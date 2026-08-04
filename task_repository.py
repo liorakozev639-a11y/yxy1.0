@@ -5,10 +5,11 @@ reviewed questionnaire bank. It runs without PostgreSQL, FastAPI, MQ,
 asynchronous workers, maps, merchants, or live activity APIs.
 """
 
+"""在任务库中目前无法做到通过智能搜索用户所在具体地址附近的商铺，基础设施，可供娱乐活动的场所等，无法形成智能化的任务推荐，因此手动添加了人工任务库，五个类别分别设置了十个任务，共五十个任务，仅供mvp测试版用户的参考，后续具体添加的方向为设置智能搜索agent，为用户实时提供具体的活动场所;同时设置五十个问题，对应用户选择的意向休闲活动的类别，用于quick和deep版的问卷调查，为后续的人物画像和推荐任务模块提供参考数据"""
+
 from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
-
 
 CATEGORIES = (
     "活力充电",
