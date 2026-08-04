@@ -27,7 +27,7 @@ SKIPPED_SCORE = 2.5
 
 @dataclass(frozen=True)
 class Question:
-    """题目元数据，画像计算只关心维度和是否反向计分。"""
+    """定义题目，返回用户维度"""
 
     id: str
     dimension: str
