@@ -1,0 +1,4 @@
+fastapi>=0.141,<0.142
+uvicorn>=0.52,<0.53
+psycopg[binary]>=3.3,<3.4
+httpx2>=2.9,<3

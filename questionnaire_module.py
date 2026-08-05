@@ -69,6 +69,8 @@ class QuestionnaireRepository(Protocol):
 
     def clear_answers(self, session_id: str) -> None: ...
 
+    def delete_questionnaire(self, session_id: str) -> None: ...
+
 
 class PostgresQuestionnaireRepository:
     def __init__(self, database_url: str) -> None:
@@ -221,6 +223,14 @@ class PostgresQuestionnaireRepository:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "DELETE FROM questionnaire_answers WHERE session_id = %s",
+                    (session_id,),
+                )
+
+    def delete_questionnaire(self, session_id: str) -> None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM questionnaires WHERE session_id = %s",
                     (session_id,),
                 )
 
@@ -415,6 +425,10 @@ class QuestionnaireService:
                 answer.skipped for answer in answers.values()
             ),
         }
+
+    def clear(self, session_id: str) -> None:
+        self.sessions.require_active(session_id)
+        self.repository.delete_questionnaire(session_id)
 
     def select_questions(
         self,
