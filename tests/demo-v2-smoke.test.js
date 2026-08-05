@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const root = path.join(__dirname, '..', 'outputs', 'free-time-agent-demo-v2');
+const frontendRoot = path.join(__dirname, '..', 'frontend');
 const demoLogic = require(path.join(root, 'logic.js'));
 
 test('demo v2 has an independent runnable bundle and runtime contract', () => {
@@ -87,4 +88,19 @@ test('demo v2 has an independent runnable bundle and runtime contract', () => {
   const library = demoLogic.getActivityLibrary();
   assert.ok(Array.isArray(library));
   assert.ok(library.length >= 16);
+});
+
+test('canonical frontend loads the API client before the questionnaire app', () => {
+  const html = fs.readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(frontendRoot, 'app.js'), 'utf8');
+
+  assert.ok(html.indexOf('<script src="api.js"></script>') >= 0);
+  assert.ok(
+    html.indexOf('<script src="api.js"></script>')
+      < html.indexOf('<script src="app.js"></script>'),
+  );
+  assert.match(app, /booting/);
+  assert.match(app, /data-mode="quick"/);
+  assert.match(app, /data-mode="deep"/);
+  assert.doesNotMatch(app, /buildCandidates|buildSchedule|show-candidates|build-plan/);
 });
