@@ -97,8 +97,13 @@ test('canonical frontend loads the API client before the questionnaire app', () 
   assert.ok(html.indexOf('<script src="api.js"></script>') >= 0);
   assert.ok(
     html.indexOf('<script src="api.js"></script>')
+      < html.indexOf('<script src="flow.js"></script>'),
+  );
+  assert.ok(
+    html.indexOf('<script src="flow.js"></script>')
       < html.indexOf('<script src="app.js"></script>'),
   );
+  assert.match(app, /window\.FreeTimeFlow/);
   assert.match(app, /booting/);
   assert.match(app, /data-mode="quick"/);
   assert.match(app, /data-mode="deep"/);

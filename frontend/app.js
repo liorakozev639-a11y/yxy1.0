@@ -1,5 +1,6 @@
 (function () {
   const api = window.FreeTimeApi;
+  const flow = window.FreeTimeFlow;
   const app = document.querySelector('.app-shell');
   const toast = document.querySelector('#toast');
   const categories = [
@@ -244,8 +245,10 @@
     state.questions = started.questions;
     state.scale = started.scale;
     state.answers = progress ? progress.answers || {} : {};
-    const firstUnanswered = state.questions.findIndex((question) => !state.answers[question.id]);
-    state.currentIndex = firstUnanswered >= 0 ? firstUnanswered : Math.max(0, state.questions.length - 1);
+    state.currentIndex = flow.firstUnansweredIndex(
+      state.questions,
+      state.answers,
+    );
   }
 
   async function createFreshSession() {
@@ -312,13 +315,21 @@
       const restored = await api.restoreSession(storedSessionId);
       state.sessionId = restored.session_id;
       hydratePreferences(restored.preferences || {});
-      if (!state.selectedCategories.length) {
+      const initialDestination = flow.resumeDestination({
+        preferences: restored.preferences || {},
+        progress: null,
+      });
+      if (initialDestination === 'welcome') {
         state.step = 'welcome';
         return;
       }
       try {
         const progress = await api.getProgress();
-        if (progress.submitted) {
+        const destination = flow.resumeDestination({
+          preferences: restored.preferences || {},
+          progress,
+        });
+        if (destination === 'result') {
           state.mode = progress.mode;
           state.result = progress;
           state.step = 'result';
@@ -332,10 +343,14 @@
         state.step = 'mode';
       }
     } catch (error) {
-      if (error.status === 404 || error.status === 410) {
-        await recoverExpiredSession();
+      const recovery = await flow.recoverInitialization(api, error);
+      if (recovery.recovered) {
+        resetLocalState();
+        state.sessionId = recovery.session.session_id;
+        state.step = 'welcome';
+        showToast('原会话已失效，已创建新的本地会话。');
       } else {
-        state.error = error.message || '无法连接本地服务';
+        state.error = recovery.message;
         state.retryTask = initialize;
       }
     } finally {

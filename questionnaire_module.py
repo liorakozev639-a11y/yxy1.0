@@ -55,6 +55,13 @@ class QuestionnaireSession:
     submitted_at: Optional[datetime] = None
 
 
+@dataclass
+class SubmissionSnapshot:
+    questionnaire: QuestionnaireSession
+    answers: list[Answer]
+    missing_question_ids: list[str]
+
+
 class QuestionnaireRepository(Protocol):
     def save_questionnaire(self, item: QuestionnaireSession) -> None: ...
 
@@ -63,13 +70,19 @@ class QuestionnaireRepository(Protocol):
         session_id: str,
     ) -> Optional[QuestionnaireSession]: ...
 
-    def save_answer(self, answer: Answer) -> None: ...
+    def save_answer_if_active(self, answer: Answer) -> bool: ...
 
     def get_answers(self, session_id: str) -> list[Answer]: ...
 
     def clear_answers(self, session_id: str) -> None: ...
 
     def delete_questionnaire(self, session_id: str) -> None: ...
+
+    def submit_if_complete(
+        self,
+        session_id: str,
+        submitted_at: datetime,
+    ) -> Optional[SubmissionSnapshot]: ...
 
 
 class PostgresQuestionnaireRepository:
@@ -173,7 +186,7 @@ class PostgresQuestionnaireRepository:
             submitted_at=row["submitted_at"],
         )
 
-    def save_answer(self, answer: Answer) -> None:
+    def save_answer_if_active(self, answer: Answer) -> bool:
         statement = """
         INSERT INTO questionnaire_answers (
             session_id, question_id, value, skipped, answered_at
@@ -192,7 +205,20 @@ class PostgresQuestionnaireRepository:
         )
         with self._connect() as connection:
             with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT submitted
+                    FROM questionnaires
+                    WHERE session_id = %s
+                    FOR UPDATE
+                    """,
+                    (answer.session_id,),
+                )
+                row = cursor.fetchone()
+                if row is None or bool(row[0]):
+                    return False
                 cursor.execute(statement, values)
+        return True
 
     def get_answers(self, session_id: str) -> list[Answer]:
         from psycopg.rows import dict_row
@@ -233,6 +259,78 @@ class PostgresQuestionnaireRepository:
                     "DELETE FROM questionnaires WHERE session_id = %s",
                     (session_id,),
                 )
+
+    def submit_if_complete(
+        self,
+        session_id: str,
+        submitted_at: datetime,
+    ) -> Optional[SubmissionSnapshot]:
+        from psycopg.rows import dict_row
+
+        with self._connect() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT session_id, mode, question_ids, submitted,
+                           started_at, submitted_at
+                    FROM questionnaires
+                    WHERE session_id = %s
+                    FOR UPDATE
+                    """,
+                    (session_id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                questionnaire = QuestionnaireSession(
+                    session_id=row["session_id"],
+                    mode=row["mode"],
+                    question_ids=list(row["question_ids"]),
+                    submitted=bool(row["submitted"]),
+                    started_at=row["started_at"],
+                    submitted_at=row["submitted_at"],
+                )
+                cursor.execute(
+                    """
+                    SELECT session_id, question_id, value, skipped, answered_at
+                    FROM questionnaire_answers
+                    WHERE session_id = %s
+                    ORDER BY answered_at, question_id
+                    """,
+                    (session_id,),
+                )
+                answers = [
+                    self._answer_from_row(answer_row)
+                    for answer_row in cursor.fetchall()
+                ]
+                answered_ids = {answer.question_id for answer in answers}
+                missing = [
+                    question_id
+                    for question_id in questionnaire.question_ids
+                    if question_id not in answered_ids
+                ]
+                if not questionnaire.submitted and not missing:
+                    cursor.execute(
+                        """
+                        UPDATE questionnaires
+                        SET submitted = TRUE, submitted_at = %s
+                        WHERE session_id = %s
+                        """,
+                        (submitted_at, session_id),
+                    )
+                    questionnaire.submitted = True
+                    questionnaire.submitted_at = submitted_at
+        return SubmissionSnapshot(questionnaire, answers, missing)
+
+    @staticmethod
+    def _answer_from_row(row: dict[str, Any]) -> Answer:
+        return Answer(
+            session_id=row["session_id"],
+            question_id=row["question_id"],
+            value=row["value"],
+            skipped=bool(row["skipped"]),
+            answered_at=row["answered_at"],
+        )
 
 
 def build_question_bank() -> list[Question]:
@@ -295,15 +393,13 @@ class QuestionnaireService:
     ) -> dict[str, Any]:
         session = self.sessions.require_active(session_id)
         existing = self.repository.get_questionnaire(session_id)
-        if existing is not None and not existing.submitted:
+        if existing is not None:
             if existing.mode != mode:
                 raise HTTPException(
                     status_code=409,
                     detail="问卷已经开始，请使用已有模式",
                 )
             return self.payload(existing)
-        if existing is not None:
-            self.repository.clear_answers(session_id)
 
         questions = self.select_questions(mode, session.preferences)
         expected_count = 5 if mode == "quick" else 30
@@ -327,7 +423,7 @@ class QuestionnaireService:
         self.require_question(questionnaire, question_id)
         if value not in {1, 2, 3, 4}:
             raise HTTPException(status_code=400, detail="答案必须为 1-4")
-        self.repository.save_answer(
+        stored = self.repository.save_answer_if_active(
             Answer(
                 session_id=session_id,
                 question_id=question_id,
@@ -336,6 +432,8 @@ class QuestionnaireService:
                 answered_at=utc_now(),
             )
         )
+        if not stored:
+            raise HTTPException(status_code=409, detail="问卷已经提交或清除")
         return {"saved": True, "question_id": question_id, "value": value}
 
     def skip_question(
@@ -345,7 +443,7 @@ class QuestionnaireService:
     ) -> dict[str, Any]:
         questionnaire = self.require_active(session_id)
         self.require_question(questionnaire, question_id)
-        self.repository.save_answer(
+        stored = self.repository.save_answer_if_active(
             Answer(
                 session_id=session_id,
                 question_id=question_id,
@@ -354,6 +452,8 @@ class QuestionnaireService:
                 answered_at=utc_now(),
             )
         )
+        if not stored:
+            raise HTTPException(status_code=409, detail="问卷已经提交或清除")
         return {"saved": True, "question_id": question_id, "skipped": True}
 
     def progress(self, session_id: str) -> dict[str, Any]:
@@ -393,27 +493,23 @@ class QuestionnaireService:
         }
 
     def submit(self, session_id: str) -> dict[str, Any]:
-        questionnaire = self.require_active(session_id)
+        self.sessions.require_active(session_id)
+        snapshot = self.repository.submit_if_complete(session_id, utc_now())
+        if snapshot is None:
+            raise HTTPException(status_code=409, detail="问卷尚未开始")
+        questionnaire = snapshot.questionnaire
         answers = {
             answer.question_id: answer
-            for answer in self.repository.get_answers(session_id)
+            for answer in snapshot.answers
         }
-        missing = [
-            question_id
-            for question_id in questionnaire.question_ids
-            if question_id not in answers
-        ]
-        if missing:
+        if snapshot.missing_question_ids:
             raise HTTPException(
                 status_code=409,
                 detail={
                     "message": "仍有题目未回答或跳过",
-                    "missing_question_ids": missing,
+                    "missing_question_ids": snapshot.missing_question_ids,
                 },
             )
-        questionnaire.submitted = True
-        questionnaire.submitted_at = utc_now()
-        self.repository.save_questionnaire(questionnaire)
         return {
             "submitted": True,
             "mode": questionnaire.mode,

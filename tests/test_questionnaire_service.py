@@ -6,8 +6,10 @@ import unittest
 from fastapi import HTTPException
 
 from questionnaire_module import (
+    Answer,
     PostgresQuestionnaireRepository,
     QuestionnaireService,
+    utc_now,
 )
 from session_module import PostgresSessionRepository, SessionService
 
@@ -105,6 +107,35 @@ class QuestionnaireServiceTests(unittest.TestCase):
                 4,
             )
         self.assertEqual(locked.exception.status_code, 409)
+
+    def test_submitted_start_and_submit_are_idempotent(self) -> None:
+        session_id = self.create_session()
+        started = self.service.start(session_id, "quick")
+        for question in started["questions"]:
+            self.service.save_answer(session_id, question["id"], 3)
+
+        first_submit = self.service.submit(session_id)
+        second_submit = self.service.submit(session_id)
+        restored = self.service.start(session_id, "quick")
+        progress = self.service.progress(session_id)
+
+        self.assertEqual(second_submit, first_submit)
+        self.assertTrue(restored["submitted"])
+        self.assertEqual(progress["answered_count"], 5)
+        with self.assertRaises(HTTPException) as different_mode:
+            self.service.start(session_id, "deep")
+        self.assertEqual(different_mode.exception.status_code, 409)
+
+        stored = self.repository.save_answer_if_active(
+            Answer(
+                session_id=session_id,
+                question_id=started["questions"][0]["id"],
+                value=4,
+                skipped=False,
+                answered_at=utc_now(),
+            )
+        )
+        self.assertFalse(stored)
 
 
 if __name__ == "__main__":
