@@ -147,7 +147,7 @@ def demo() -> None:
         repository=repository,
         limit=6,
     )
-
+    # assert 用于检查演示结果是否符合预期。
     assert result["candidate_count"] > 0
     assert set(result["covered_categories"]) == set(selected_categories)
     assert result["missing_categories"] == []
