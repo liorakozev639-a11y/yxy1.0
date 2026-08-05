@@ -1,86 +1,150 @@
-"""Session Module runnable example.
+"""Session domain service and persistence repositories.
 
-Run:
-    python -m pip install fastapi uvicorn
-    python examples/session_module.py
-
-Open:
-    http://127.0.0.1:8000/docs
-
-The example uses an in-memory repository so it is easy to run locally.
-Replace the repository with PostgreSQL in production.
+The MVP identifies a browser session only by ``session_id``.  The module is
+HTTP-framework friendly, but contains no route registration; ``main.py`` owns
+the public API.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import secrets
+import os
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
-import uvicorn
-from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
-
-
-app = FastAPI(
-    title="Free Time Agent - Session Module",
-    version="1.0.0",
-)
+from fastapi import HTTPException
 
 
 class SessionStage:
     INTERESTS = "interests"
     PREFERENCES = "preferences"
     QUESTIONNAIRE = "questionnaire"
-    RECOMMENDATION = "recommendation"
-    PLANNING = "planning"
-    CONFIRMED = "confirmed"
-    EXECUTING = "executing"
 
 
 @dataclass
 class Session:
     id: str
-    token_hash: str
     stage: str
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
     version: int = 1
     preferences: dict[str, Any] = field(default_factory=dict)
-    answers: dict[str, int] = field(default_factory=dict)
-    profile: dict[str, Any] = field(default_factory=dict)
-    plan: dict[str, Any] = field(default_factory=dict)
 
 
-class InMemorySessionRepository:
-    def __init__(self) -> None:
-        self._sessions: dict[str, Session] = {}
+class SessionRepository(Protocol):
+    def save(self, session: Session) -> None: ...
+
+    def get(self, session_id: str) -> Optional[Session]: ...
+
+    def delete(self, session_id: str) -> None: ...
+
+
+class PostgresSessionRepository:
+    """Synchronous PostgreSQL repository for the small MVP data set."""
+
+    def __init__(self, database_url: str) -> None:
+        if not database_url:
+            raise ValueError("database_url 不能为空")
+        self.database_url = database_url
+        self.init_schema()
+
+    def _connect(self):
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError(
+                "PostgreSQL 模式需要 psycopg，请安装 psycopg[binary]"
+            ) from exc
+        return psycopg.connect(self.database_url)
+
+    def init_schema(self) -> None:
+        statements = (
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                stage TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                preferences JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """,
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS stage TEXT",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT '{}'::jsonb",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS token_hash TEXT",
+            "ALTER TABLE sessions ALTER COLUMN token_hash DROP NOT NULL",
+        )
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                for statement in statements:
+                    cursor.execute(statement)
 
     def save(self, session: Session) -> None:
-        self._sessions[session.id] = session
+        from psycopg.types.json import Jsonb
+
+        statement = """
+        INSERT INTO sessions (
+            id, stage, created_at, updated_at, expires_at, version, preferences
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (id) DO UPDATE SET
+            stage = EXCLUDED.stage,
+            updated_at = EXCLUDED.updated_at,
+            expires_at = EXCLUDED.expires_at,
+            version = EXCLUDED.version,
+            preferences = EXCLUDED.preferences
+        """
+        values = (
+            session.id,
+            session.stage,
+            session.created_at,
+            session.updated_at,
+            session.expires_at,
+            session.version,
+            Jsonb(session.preferences),
+        )
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(statement, values)
 
     def get(self, session_id: str) -> Optional[Session]:
-        return self._sessions.get(session_id)
+        from psycopg.rows import dict_row
+
+        statement = """
+        SELECT id, stage, created_at, updated_at, expires_at, version, preferences
+        FROM sessions
+        WHERE id = %s
+        """
+        with self._connect() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(statement, (session_id,))
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        return Session(
+            id=row["id"],
+            stage=row["stage"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            expires_at=row["expires_at"],
+            version=int(row["version"]),
+            preferences=dict(row["preferences"] or {}),
+        )
 
     def delete(self, session_id: str) -> None:
-        self._sessions.pop(session_id, None)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM sessions WHERE id = %s", (session_id,))
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def token_matches(token: str, expected_hash: str) -> bool:
-    return hmac.compare_digest(hash_token(token), expected_hash)
 
 
 def make_id(prefix: str) -> str:
@@ -88,210 +152,77 @@ def make_id(prefix: str) -> str:
 
 
 class SessionService:
-    def __init__(self, repository: InMemorySessionRepository) -> None:
+    def __init__(self, repository: SessionRepository) -> None:
         self.repository = repository
 
     def create(self, expires_in_hours: int = 24) -> dict[str, Any]:
-        session_id = make_id("sess")
-        token = secrets.token_urlsafe(32)
+        if expires_in_hours <= 0:
+            raise ValueError("expires_in_hours 必须大于 0")
         current = utc_now()
-
         session = Session(
-            id=session_id,
-            token_hash=hash_token(token),
+            id=make_id("sess"),
             stage=SessionStage.INTERESTS,
             created_at=current,
             updated_at=current,
             expires_at=current + timedelta(hours=expires_in_hours),
         )
         self.repository.save(session)
+        return self._payload(session, include_preferences=False)
 
-        return {
-            "session_id": session_id,
-            "token": token,
-            "stage": session.stage,
-            "version": session.version,
-            "expires_at": session.expires_at.isoformat(),
-        }
-
-    def require_valid(
-        self,
-        session_id: str,
-        token: str,
-    ) -> Session:
+    def require_active(self, session_id: str) -> Session:
         session = self.repository.get(session_id)
-
         if session is None:
-            raise HTTPException(status_code=401, detail="会话不存在")
-
+            raise HTTPException(status_code=404, detail="会话不存在")
         if utc_now() >= session.expires_at:
-            raise HTTPException(status_code=401, detail="会话已过期")
-
-        if not token_matches(token, session.token_hash):
-            raise HTTPException(status_code=401, detail="会话 token 无效")
-
+            raise HTTPException(status_code=410, detail="会话已过期")
         return session
 
     def save_preferences(
         self,
         session_id: str,
-        token: str,
         preferences: dict[str, Any],
     ) -> Session:
-        session = self.require_valid(session_id, token)
-        session.preferences = preferences
+        session = self.require_active(session_id)
+        session.preferences = dict(preferences)
         session.stage = SessionStage.QUESTIONNAIRE
         self._touch(session)
+        self.repository.save(session)
         return session
 
-    def save_answer(
-        self,
-        session_id: str,
-        token: str,
-        question_id: str,
-        value: int,
-    ) -> Session:
-        if value not in {1, 2, 3, 4}:
-            raise HTTPException(
-                status_code=400,
-                detail="答案必须是 1、2、3 或 4",
-            )
+    def restore(self, session_id: str) -> dict[str, Any]:
+        return self._payload(self.require_active(session_id))
 
-        session = self.require_valid(session_id, token)
-        session.answers[question_id] = value
-        session.stage = SessionStage.QUESTIONNAIRE
-        self._touch(session)
-        return session
-
-    def restore(
-        self,
-        session_id: str,
-        token: str,
-    ) -> dict[str, Any]:
-        session = self.require_valid(session_id, token)
-
-        return {
-            "session_id": session.id,
-            "stage": session.stage,
-            "version": session.version,
-            "preferences": session.preferences,
-            "answers": session.answers,
-            "profile": session.profile,
-            "plan": session.plan,
-            "expires_at": session.expires_at.isoformat(),
-        }
-
-    def clear_data(
-        self,
-        session_id: str,
-        token: str,
-    ) -> None:
-        session = self.require_valid(session_id, token)
+    def clear_data(self, session_id: str) -> None:
+        session = self.require_active(session_id)
         session.preferences.clear()
-        session.answers.clear()
-        session.profile.clear()
-        session.plan.clear()
         session.stage = SessionStage.INTERESTS
         self._touch(session)
+        self.repository.save(session)
 
     @staticmethod
     def _touch(session: Session) -> None:
         session.updated_at = utc_now()
         session.version += 1
 
-
-repository = InMemorySessionRepository()
-service = SessionService(repository)
-
-
-class PreferencesInput(BaseModel):
-    categories: list[str] = Field(min_length=1, max_length=5)
-    duration: str
-    budget: str
-    outing: str
-    company: str
-    city_or_campus: Optional[str] = Field(default=None, max_length=128)
-    rest_only: bool = False
-
-
-class AnswerInput(BaseModel):
-    value: int = Field(ge=1, le=4)
+    @staticmethod
+    def _payload(
+        session: Session,
+        *,
+        include_preferences: bool = True,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "session_id": session.id,
+            "stage": session.stage,
+            "version": session.version,
+            "expires_at": session.expires_at.isoformat(),
+        }
+        if include_preferences:
+            payload["preferences"] = dict(session.preferences)
+        return payload
 
 
-def read_bearer_token(authorization: Optional[str]) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="需要 Authorization: Bearer <token>",
-        )
-    return authorization.removeprefix("Bearer ").strip()
-
-
-def response(data: Any) -> dict[str, Any]:
-    return {
-        "requestId": make_id("req"),
-        "data": data,
-        "error": None,
-    }
-
-
-@app.post("/api/v1/sessions")
-def create_session() -> dict[str, Any]:
-    return response(service.create())
-
-
-@app.get("/api/v1/sessions/{session_id}")
-def get_session(
-    session_id: str,
-    authorization: Optional[str] = Header(default=None),
-) -> dict[str, Any]:
-    token = read_bearer_token(authorization)
-    return response(service.restore(session_id, token))
-
-
-@app.put("/api/v1/sessions/{session_id}/preferences")
-def put_preferences(
-    session_id: str,
-    body: PreferencesInput,
-    authorization: Optional[str] = Header(default=None),
-) -> dict[str, Any]:
-    token = read_bearer_token(authorization)
-    session = service.save_preferences(
-        session_id,
-        token,
-        body.model_dump(),
-    )
-    return response({"saved": True, "stage": session.stage})
-
-
-@app.patch(
-    "/api/v1/sessions/{session_id}/questionnaire/answers/{question_id}"
-)
-def patch_answer(
-    session_id: str,
-    question_id: str,
-    body: AnswerInput,
-    authorization: Optional[str] = Header(default=None),
-) -> dict[str, Any]:
-    token = read_bearer_token(authorization)
-    service.save_answer(session_id, token, question_id, body.value)
-    return response({"saved": True, "question_id": question_id})
-
-
-@app.delete("/api/v1/sessions/{session_id}/data")
-def delete_session_data(
-    session_id: str,
-    authorization: Optional[str] = Header(default=None),
-) -> dict[str, Any]:
-    token = read_bearer_token(authorization)
-    service.clear_data(session_id, token)
-    return response({"deleted": True})
-
-
-if __name__ == "__main__":
-    uvicorn.run(
-        "session_module:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=False,
-    )
+def build_session_repository() -> PostgresSessionRepository:
+    database_url = os.getenv("SESSION_DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("必须设置 SESSION_DATABASE_URL")
+    return PostgresSessionRepository(database_url)
