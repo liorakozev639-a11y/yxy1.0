@@ -1,0 +1,1364 @@
+# 空闲时间规划 Agent MVP 后端技术方案
+
+**版本：** v2.0  
+**依据：**《空闲时间规划 Agent MVP 产品需求文档》  
+**实现原则：** 模块化单体、同步 API、人工审核任务库、规则优先、无 MQ、无异步 Worker。
+
+## 1. 方案概述
+
+### 1.1 MVP 后端目标
+
+后端完成以下闭环：
+
+```text
+匿名会话
+→ 兴趣和前置条件
+→ 5 题或 30 题问卷
+→ 用户画像
+→ 任务筛选
+→ Agent 组合推荐
+→ 时间排程
+→ 任务执行
+→ 计划调整和反馈
+```
+
+### 1.2 技术架构
+
+```text
+Web 前端
+   ↓ 同步 HTTP/JSON
+FastAPI 单体服务
+   ├── Session Module
+   ├── Questionnaire Module
+   ├── Profile Module
+   ├── Task Repository
+   ├── Recommendation Module
+   ├── Scheduling Module
+   ├── Execution Module
+   └── Feedback Module
+   ↓
+PostgreSQL
+```
+
+### 1.3 推荐技术栈
+
+| 层 | 技术 |
+|---|---|
+| API | Python 3.11+、FastAPI |
+| 数据校验 | Pydantic |
+| ORM | SQLAlchemy 2.x |
+| 数据库 | PostgreSQL |
+| 数据迁移 | Alembic |
+| 测试 | pytest、httpx |
+| 部署 | Docker + 单个 API 服务 |
+
+MVP 不使用 Redis、MQ、Celery、定时 Worker、邮件服务、PDF 服务或实时外部 API。
+
+## 2. 统一代码约定
+
+以下代码是模块核心逻辑的最小示例。实际项目中应把模型、服务和路由分别放入不同文件。
+
+```python
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from uuid import uuid4
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+app = FastAPI(title="Free Time Agent API")
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid4().hex}"
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+```
+
+生产环境中，内存字典替换为 PostgreSQL Repository，接口保持不变。
+
+## 3. Session Module：会话模块
+
+### 3.1 精简职责
+
+Session Module 为一次空闲时间规划建立独立的数据边界，负责匿名会话创建、token 校验、流程阶段保存、草稿恢复、有效期控制和本次数据删除。
+
+它不负责推荐任务、计算画像或生成计划，只负责回答：
+
+```text
+当前请求属于哪个用户会话？
+这个会话目前进行到哪一步？
+这个会话能否继续访问自己的数据？
+```
+
+### 3.2 保存内容
+
+```text
+会话基础信息：session_id、token_hash、stage、version、expires_at
+业务草稿：preferences、questionnaire_answers、profile、plan
+```
+
+生产环境中，基础信息保存到 `sessions` 表，业务数据分别保存到 `preferences`、`questionnaire_answers`、`profiles` 和 `plans` 表，并通过 `session_id` 关联。
+
+### 3.3 状态阶段
+
+```text
+interests
+→ preferences
+→ questionnaire
+→ recommendation
+→ planning
+→ confirmed
+→ executing
+```
+
+阶段用于页面恢复和流程校验。用户可以返回修改已完成步骤，但不能跳过必要的前置步骤直接生成计划。
+
+### 3.4 完整同步工作流
+
+#### 创建会话
+
+```text
+POST /api/v1/sessions
+→ 生成随机 session_id
+→ 生成不可预测的 token
+→ 计算 token_hash
+→ 保存会话记录和有效期
+→ 返回 session_id、token、stage
+```
+
+#### 访问会话
+
+```text
+请求携带 Authorization: Bearer <token>
+→ 解析 token
+→ 根据 session_id 查询会话
+→ 对 token 做哈希
+→ 使用安全比较校验哈希
+→ 检查 expires_at
+→ 检查资源是否属于该 session
+→ 返回当前草稿和 stage
+```
+
+#### 保存业务数据
+
+```text
+提交兴趣或问卷答案
+→ 校验 token
+→ 校验字段值
+→ 写入对应业务数据
+→ 更新 stage、updated_at、version
+→ 返回保存结果
+```
+
+#### 恢复会话
+
+```text
+用户刷新或重新进入网页
+→ 前端读取临时 session 凭证
+→ GET /api/v1/sessions/{session_id}
+→ 服务端校验 token 和有效期
+→ 返回 stage、preferences、answers、profile、plan
+→ 前端恢复对应页面
+```
+
+#### 删除本次数据
+
+```text
+DELETE /api/v1/sessions/{session_id}/data
+→ 校验 token
+→ 删除问卷、画像、计划、执行和反馈数据
+→ 删除或注销 session
+→ 返回删除成功
+```
+
+### 3.5 安全和一致性要求
+
+- 客户端持有原始 token，服务端只保存 `token_hash`。
+- 使用 `hmac.compare_digest` 做哈希比较。
+- token 只通过 HTTPS 传输。
+- 所有业务资源查询必须同时校验 `session_id` 和 token。
+- session 过期后返回 401，不继续访问旧数据。
+- 写操作使用 `version` 做乐观锁，避免多个页面互相覆盖。
+- 删除会话数据时，相关业务数据必须在同一事务内删除。
+
+### 3.6 完整运行代码
+
+完整示例文件：
+
+[session_module.py](C:\Users\杨星宇\Documents\Codex\2026-08-01\an-zhu\examples\session_module.py)
+
+安装依赖：
+
+```bash
+python -m pip install fastapi uvicorn
+```
+
+启动服务：
+
+```bash
+python examples/session_module.py
+```
+
+服务启动后访问：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+示例使用内存 Repository，进程重启后数据会消失；正式环境只需将 `InMemorySessionRepository` 替换为 PostgreSQL Repository，Service 和 API 结构可以保留。
+
+### 3.7 API 示例
+
+创建会话：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/sessions
+```
+
+保存前置条件：
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/v1/sessions/{session_id}/preferences \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "categories": ["松弛疗愈", "自我成长"],
+    "duration": "half-day",
+    "budget": "0-50",
+    "outing": "home",
+    "company": "solo",
+    "city_or_campus": null,
+    "rest_only": false
+  }'
+```
+
+恢复会话：
+
+```bash
+curl http://127.0.0.1:8000/api/v1/sessions/{session_id} \
+  -H "Authorization: Bearer {token}"
+```
+
+### 3.8 验收点
+
+- 无需注册即可创建会话。
+- token 不以明文保存。
+- 错误 token 无法访问会话。
+- 过期会话无法继续访问。
+- 刷新页面可以恢复当前 stage 和草稿。
+- 不同 session 之间不能读取或修改彼此数据。
+- 删除本次数据后，问卷、计划、执行和反馈数据不再可读。
+
+## 4. Questionnaire Module：问卷模块
+
+### 4.1 精简职责
+
+生成快速版或深度版问卷，保存答案、跳过记录和提交状态。
+
+### 4.2 输入和输出
+
+```text
+输入：session_id、问卷模式、前置条件
+输出：题目列表、答案进度、提交结果
+依赖：question_bank、questionnaire_answers
+```
+
+### 4.3 同步工作流
+
+```text
+选择 quick/deep
+→ 查询审核题库
+→ 按出行、同行和身份条件过滤
+→ 返回 5 题或 30 题
+→ 每次回答立即保存
+→ 提交后进入 Profile Module
+```
+
+### 4.4 最小示例代码
+
+```python
+class QuestionnaireStart(BaseModel):
+    mode: str = Field(pattern="^(quick|deep)$")
+
+QUESTION_BANK = [
+    {"id": "q_energy", "mode": "quick", "text": "我想通过轻度活动恢复状态"},
+    {"id": "q_rest", "mode": "quick", "text": "我今天更需要放松和休息"},
+    {"id": "q_social", "mode": "quick", "text": "我愿意和别人一起度过空闲时间"},
+    {"id": "q_explore", "mode": "quick", "text": "我想尝试一些新鲜的体验"},
+    {"id": "q_growth", "mode": "quick", "text": "我希望利用时间学习或提升自己"},
+]
+
+answers: dict[tuple[str, str], int] = {}
+
+@app.post("/api/v1/sessions/{session_id}/questionnaire/start")
+def start_questionnaire(
+    session_id: str,
+    body: QuestionnaireStart,
+):
+    count = 5 if body.mode == "quick" else 30
+    questions = QUESTION_BANK[:count]
+    return {
+        "data": {
+            "mode": body.mode,
+            "total": count,
+            "questions": questions,
+            "scale": ["非常同意", "比较同意", "不太同意", "完全不同意"],
+        },
+        "error": None,
+    }
+
+@app.patch("/api/v1/sessions/{session_id}/questionnaire/answers/{question_id}")
+def save_answer(session_id: str, question_id: str, value: int):
+    if value not in {1, 2, 3, 4}:
+        raise HTTPException(status_code=400, detail="答案必须为 1-4")
+    answers[(session_id, question_id)] = value
+    return {"data": {"saved": True}, "error": None}
+```
+
+### 4.5 验收点
+
+- quick 返回 5 题，deep 返回 30 题。
+- 只能提交 1-4 的合法答案。
+- 支持跳过、修改和恢复。
+- 题目来自审核题库，不由模型临时生成。
+
+### 4.6 详细运行过程
+
+#### 开始问卷
+
+```text
+POST /questionnaire/start
+→ 校验 session
+→ 读取 preferences
+→ 查询 status=approved 的题目
+→ 根据 quick/deep 选择 5/30 题
+→ 根据居家/外出、独处/结伴等条件过滤
+→ 保存 questionnaire_session
+→ 返回题目和量表
+```
+
+#### 保存、修改和跳过答案
+
+```text
+PATCH /questionnaire/answers/{question_id}
+→ 校验题目属于当前问卷
+→ 校验 value 必须是 1-4
+→ 保存或覆盖答案
+→ 返回 saved=true
+
+POST /questionnaire/skip/{question_id}
+→ 校验题目属于当前问卷
+→ 保存 skipped=true
+→ 该题不阻塞提交
+```
+
+每次回答都立即保存，用户刷新页面后可以通过进度接口恢复。
+
+#### 恢复问卷
+
+```text
+GET /questionnaire/progress
+→ 查询当前 questionnaire_session
+→ 查询当前 session 的答案
+→ 统计已答、已跳过和未答题目
+→ 前端定位到第一道未处理题目
+```
+
+#### 提交问卷
+
+```text
+POST /questionnaire/submit
+→ 检查每道题都有答案或 skipped 记录
+→ 统计答题数量和跳过数量
+→ 标记 submitted=true
+→ 生成 Profile Module 的结构化输入
+→ 返回 next_stage=profile
+```
+
+### 4.7 业务规则
+
+- 题目必须来自人工审核题库，不由模型临时生成。
+- 用户可以修改已保存答案，后写入的答案覆盖旧答案。
+- 跳过题目保存 `skipped=true`，画像计算时使用中性值。
+- 已提交问卷不能继续修改；如需修改，应创建新的问卷版本。
+- 题目数量不足时，只能使用同维度审核题补充。
+- Questionnaire Module 只负责收集和整理答案，不负责推荐任务或安排时间。
+
+### 4.8 完整运行代码
+
+完整示例文件：
+
+[questionnaire_module.py](C:\Users\杨星宇\Documents\Codex\2026-08-01\an-zhu\examples\questionnaire_module.py)
+
+安装依赖：
+
+```bash
+python -m pip install fastapi uvicorn
+```
+
+启动服务：
+
+```bash
+python examples/questionnaire_module.py
+```
+
+打开接口文档：
+
+```text
+http://127.0.0.1:8001/docs
+```
+
+该示例包含一个本地内存 Session Store，用于独立运行演示。正式环境中应替换为 Session Module 的会话校验，并将题库和答案保存到 PostgreSQL。
+
+创建演示会话：
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/demo/sessions
+```
+
+开始快速问卷：
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/sessions/{session_id}/questionnaire/start \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"quick"}'
+```
+
+保存答案：
+
+```bash
+curl -X PATCH http://127.0.0.1:8001/api/v1/sessions/{session_id}/questionnaire/answers/q_rest \
+  -H "Content-Type: application/json" \
+  -d '{"value":4}'
+```
+
+查看进度：
+
+```bash
+curl http://127.0.0.1:8001/api/v1/sessions/{session_id}/questionnaire/progress
+```
+
+提交问卷：
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/sessions/{session_id}/questionnaire/submit
+```
+
+## 5. Profile Module：用户画像模块
+
+### 5.1 精简职责
+
+将问卷答案转换为活力、恢复、社交、探索和成长等结构化偏好。
+
+### 5.2 输入和输出
+
+```text
+输入：问卷答案、兴趣方向、前置条件
+输出：profile scores、constraints、confidence
+依赖：questionnaire_answers、preferences
+```
+
+### 5.3 同步工作流
+
+```text
+读取已提交答案
+→ 转换量表分数
+→ 处理反向题
+→ 计算各维度平均值
+→ 合并预算、时间和出行约束
+→ 保存画像版本
+```
+
+### 5.4 最小示例代码
+
+```python
+def build_profile(raw_answers: dict[str, int]) -> dict:
+    def score(question_id: str) -> float:
+        # 1-4 转成 0-1；题库中的反向题应在这里反转
+        value = raw_answers.get(question_id, 2)
+        return round((value - 1) / 3, 2)
+
+    return {
+        "energy_preference": score("q_energy"),
+        "recovery_need": score("q_rest"),
+        "social_preference": score("q_social"),
+        "exploration_preference": score("q_explore"),
+        "growth_preference": score("q_growth"),
+        "confidence": min(1.0, len(raw_answers) / 5),
+        "rule_version": "rule-v1",
+    }
+```
+
+### 5.5 验收点
+
+- 相同答案得到相同画像。
+- 画像计算不依赖大模型。
+- 画像保留规则版本。
+- 预算、时长、出行和同行条件作为硬约束保存。
+
+### 5.6 Profile Module 详细实现与运行规则
+
+Profile Module 只负责把已经提交的问卷答案转换为结构化画像，不负责推荐任务、搜索商户或安排时间。MVP 使用确定性的规则计算，保证相同输入得到相同输出。
+
+#### 5.6.1 输入与输出
+
+```text
+输入：session_id、Question 列表、Answer 列表、preferences
+输出：Profile(session_id、scores、constraints、confidence、rule_version)
+依赖：Questionnaire Module 提交结果、Session Module 的 preferences
+```
+
+每个答案包含 `question_id`、`value`（1～4 或 `None`）和 `skipped`；每道题包含 `id`、`dimension` 和 `reverse_scored`。
+
+#### 5.6.2 打分标准
+
+```text
+1 = 完全不同意
+2 = 不太同意
+3 = 比较同意
+4 = 非常同意
+```
+
+处理规则：
+
+1. 普通题直接使用用户选择的 1～4 分。
+2. 反向题使用 `5 - value`，例如原始 4 分转换为 1 分。
+3. 跳过题使用中性值 `2.5`，避免跳过行为直接拉高或拉低画像。
+4. 同一维度先求平均分，再按 `(average - 1) / 3` 转成 0～1。
+5. 保留两位小数，并记录 `rule_version`。
+
+#### 5.6.3 同步工作流
+
+```text
+Questionnaire Module 校验问卷已提交
+→ 读取该 session 的题目和答案
+→ 跳过题转换为 2.5
+→ 反向题执行 5 - value
+→ 按 dimension 聚合分数
+→ 计算平均分并标准化为 0～1
+→ 计算 confidence
+→ 合并 preferences 形成 constraints
+→ 保存 Profile 版本
+→ 返回画像给 Task Repository 和 Recommendation Module
+```
+
+`confidence` 只表示输入完整度，MVP 可按“已处理题数 / 问卷总题数”计算，不代表医学或心理学结论。
+
+#### 5.6.4 模块边界
+
+```text
+Task Repository：使用 constraints 做预算、时长、出行和同行方式硬过滤
+Recommendation Module：使用 scores 对候选任务排序
+Profile Module：只计算和保存画像，不直接决定最终任务
+```
+
+#### 5.6.5 完整运行代码
+
+完整示例文件：
+
+[profile_module.py](C:\Users\杨星宇\Documents\Codex\2026-08-01\an-zhu\examples\profile_module.py)
+
+安装依赖并启动：
+
+```bash
+python -m pip install fastapi uvicorn
+python examples/profile_module.py
+```
+
+接口文档：`http://127.0.0.1:8002/docs`。
+
+示例提供 `POST /api/v1/sessions/{session_id}/profile/build`，可直接验证普通题、反向题、跳过题、按维度聚合和 0～1 标准化。
+
+#### 5.6.6 验收点
+
+- 相同题目和答案得到相同画像。
+- `value` 只能是 1～4，跳过题的 `value` 可以为空。
+- 反向题严格执行 `5 - value`。
+- 跳过题按 2.5 处理中性分。
+- 每个维度的得分范围为 0～1。
+- 画像计算不依赖大模型、MQ 或异步 Worker。
+- 画像保留 `rule_version`。
+- 预算、时长、出行和同行条件作为硬约束保存。
+
+## 6. Task Repository：任务库模块
+
+### 6.1 精简职责
+
+Task Repository 是推荐链路中的候选任务提供者，负责提供人工审核的公共任务和当前用户的自定义任务。
+
+它只做任务库管理和硬约束过滤，不负责：
+
+- 根据画像分数排序；
+- 生成最终计划；
+- 调用大模型；
+- 查询实时地图、商户、活动或价格。
+
+### 6.2 任务来源
+
+```text
+MVP：人工录入或初始化脚本导入
+后续：合规 API 适配
+不采用：直接爬取互联网
+```
+
+### 6.3 输入和输出
+
+```text
+输入：session_id、画像 constraints、兴趣方向、任务筛选条件
+输出：approved 任务列表
+依赖：tasks、custom_tasks
+```
+
+其中 `constraints` 主要包含预算、最大时长、出行方式和同行方式。`scores` 由 Profile Module 生成，但不在本模块中参与排序。
+
+### 6.4 同步工作流
+
+```text
+接收 session_id 和筛选条件
+→ 查询公共 tasks 和当前 session 的 custom_tasks
+→ 过滤 status != approved 的任务
+→ 过滤预算上限
+→ 过滤任务最大时长
+→ 过滤居家、就近或全城出行方式
+→ 过滤独处、结伴或两者皆可
+→ 按用户选择的兴趣方向过滤
+→ 返回候选任务 ID 和任务详情
+```
+
+出行方式采用逐级兼容规则：`home` 只匹配居家任务，`nearby` 可以匹配居家和就近任务，`city` 可以匹配居家、就近和全城任务，`any` 不限制出行范围。同行方式中，`both` 表示任务既适合独处也适合结伴。
+
+### 6.5 运行原理
+
+用户完成问卷后，Profile Module 将前置条件整理为 `constraints`。Task Repository 收到请求后，将公共任务和当前会话的自定义任务合并为候选集合，再逐项执行硬过滤。所有硬条件都满足的任务才会交给 Recommendation Module。
+
+```text
+Profile Module
+    ├── scores：用于后续排序
+    └── constraints：用于本模块硬过滤
+                  ↓
+Task Repository
+    ├── status 过滤
+    ├── 预算过滤
+    ├── 时长过滤
+    ├── 出行过滤
+    ├── 同行过滤
+    └── 兴趣方向过滤
+                  ↓
+Recommendation Module
+    └── 根据 scores 排序并生成匹配理由
+```
+
+公共任务和自定义任务必须隔离保存。用户新增自定义任务时，只写入 `custom_tasks`，不会修改 `tasks` 中的公共任务。没有城市数据时，查询仍可返回通用居家任务。
+
+### 6.6 完整运行代码
+
+完整示例文件：
+
+`examples/task_repository.py`
+
+运行命令：
+
+```bash
+python examples/task_repository.py
+```
+
+示例代码包含以下功能：
+
+- `Task`：任务数据结构；
+- `TaskRepository.public_tasks`：50 条公共任务，每个分类 10 条；
+- `TaskRepository.custom_tasks`：按 `session_id` 隔离的自定义任务集合；
+- `add_custom_task()`：新增用户自定义任务；
+- `search_tasks()`：执行审核状态、预算、时长、出行、同行、兴趣方向和使用场景过滤；
+- `Question` / `QUESTION_BANK`：50 道审核题目，每个分类 10 道；
+- `get_questions()`：向 Questionnaire Module 返回指定分类的审核题目；
+- `demo()`：创建自定义任务并查询候选任务。
+
+五类活动及题目数量固定如下：
+
+```text
+活力充电：10 个活动，10 道题目
+松弛疗愈：10 个活动，10 道题目
+社交连接：10 个活动，10 道题目
+乐享探索：10 个活动，10 道题目
+自我成长：10 个活动，10 道题目
+总计：50 个活动，50 道题目
+```
+
+活动通过 `scenarios` 保存五个重点使用场景标签。这样可以在“工作后精力不足”时优先检索恢复型任务，也可以在“临时改变想法”时使用短时、低预算任务重新组合计划。题目仍由 Questionnaire Module 负责展示、保存答案和提交；任务库文件中的题库用于 MVP 初始化和本地联调，不代表 Task Repository 负责画像计算。
+
+核心查询逻辑如下：
+
+```python
+def search_tasks(
+    session_id: str,
+    budget_limit: int,
+    max_duration: int,
+    outing: str,
+    company: str,
+    categories: Optional[list[str]] = None,
+) -> list[Task]:
+    candidates = public_tasks + custom_tasks.get(session_id, [])
+    return [
+        task for task in candidates
+        if task.status == "approved"
+        and task.budget <= budget_limit
+        and task.duration <= max_duration
+        and matches_outing(task, outing)
+        and matches_company(task, company)
+        and (not categories or task.category in categories)
+    ]
+```
+
+完整的 `Task` 定义、过滤函数、参数校验和演示入口以独立文件为准，避免文档代码和实际示例出现两份不同实现。
+
+### 6.7 与相邻模块的边界
+
+```text
+Profile Module：计算 scores 和 constraints，不直接选任务
+Task Repository：根据 constraints 做硬过滤，不负责排序
+Recommendation Module：根据 scores 对候选任务排序并检查方向覆盖
+Scheduling Module：把推荐任务放入用户空闲时间
+```
+
+### 6.8 验收点
+
+- 只有审核任务参与推荐。
+- 用户自定义任务不修改公共任务库。
+- 公共任务和自定义任务按数据边界分别保存。
+- 不保存未经验证的实时地点和价格。
+- 无城市数据时可返回通用居家任务。
+- 预算、时长、出行、同行条件全部作为硬约束执行。
+- 五个分类各有 10 个活动和 10 道题目，题目使用四级同意量表。
+- 五个重点使用场景均有活动标签覆盖。
+- 查询结果只返回任务库中的任务 ID 和详情。
+
+## 7. Recommendation Module：推荐模块
+
+### 7.1 精简职责
+
+根据 Profile Module 生成的画像分数和 Task Repository 返回的候选任务，生成覆盖用户兴趣方向的任务组合和匹配理由。
+
+Recommendation Module 的处理顺序是“先硬约束、后偏好排序、再分类覆盖”。预算、时长、出行、同行方式和审核状态由 Task Repository 过滤；本模块只在合格候选任务中进行排序和组合。
+
+### 7.2 Agent 的 MVP 作用
+
+Agent 在 MVP 中是受规则约束的任务编排器，负责：
+
+- 对候选任务排序。
+- 组合多个任务。
+- 生成匹配理由。
+- 给出任务执行顺序。
+
+Agent 不负责联网搜索、真实地点查询或突破硬约束。
+
+### 7.3 同步工作流
+
+```text
+读取 profile、constraints 和用户选择的分类
+→ 调用 Task Repository 获取 approved 候选任务
+→ 建立分类与偏好分数的映射
+→ 按偏好分数、时长和预算排序
+→ 第一轮优先覆盖每个用户选择的分类
+→ 第二轮补充剩余推荐名额
+→ 生成任务匹配理由
+→ 返回 covered_categories 和 missing_categories
+→ 将推荐结果交给 Scheduling Module
+```
+
+如果某个分类没有符合硬约束的任务，模块不能虚构任务，而是返回 `missing_categories`。前端可以据此提示用户放宽预算、扩大出行范围或重新选择分类。
+
+### 7.4 完整运行代码
+
+完整示例文件：
+
+`examples/recommendation_module.py`
+
+运行命令：
+
+```bash
+python examples/recommendation_module.py
+```
+
+代码包含两个入口：
+
+- `recommend_tasks()`：对已筛选候选任务排序、覆盖分类并生成理由；
+- `build_recommendation()`：串联 Profile Module 的画像约束、Task Repository 和推荐逻辑。
+
+完整运行代码如下：
+
+```python
+from dataclasses import asdict
+from typing import Any
+
+from task_repository import CATEGORIES, Task, TaskRepository
+
+
+def recommend_tasks(
+    profile: dict[str, Any],
+    selected_categories: list[str],
+    candidates: list[Task],
+    limit: int = 10,
+) -> dict[str, Any]:
+    if not selected_categories:
+        raise ValueError("至少需要选择一个活动分类")
+    if limit <= 0:
+        raise ValueError("推荐任务数量必须大于 0")
+    if any(category not in CATEGORIES for category in selected_categories):
+        raise ValueError("存在不支持的活动分类")
+
+    selected_category_set = set(selected_categories)
+    scores = profile.get("scores", {})
+    preference_map = {
+        category: float(scores.get(category, 0))
+        for category in selected_category_set
+    }
+    usable = [
+        task for task in candidates
+        if task.status == "approved"
+        and task.category in selected_category_set
+    ]
+    ranked = sorted(
+        usable,
+        key=lambda task: (
+            -preference_map.get(task.category, 0),
+            task.duration,
+            task.budget,
+            task.id,
+        ),
+    )
+
+    selected = []
+    selected_ids = set()
+    covered = set()
+
+    for task in ranked:
+        if task.category in covered:
+            continue
+        selected.append(task)
+        selected_ids.add(task.id)
+        covered.add(task.category)
+        if len(selected) >= limit:
+            break
+
+    if len(selected) < limit:
+        for task in ranked:
+            if task.id in selected_ids:
+                continue
+            selected.append(task)
+            selected_ids.add(task.id)
+            if len(selected) >= limit:
+                break
+
+    reasons = [
+        {
+            "task_id": task.id,
+            "text": (
+                f"任务属于{task.category}，当前分类偏好分数为"
+                f"{preference_map.get(task.category, 0):.2f}，"
+                f"预计需要{task.duration}分钟，预算约为{task.budget}元。"
+            ),
+        }
+        for task in selected
+    ]
+
+    return {
+        "tasks": [asdict(task) for task in selected],
+        "task_ids": [task.id for task in selected],
+        "covered_categories": sorted(covered),
+        "missing_categories": sorted(selected_category_set - covered),
+        "reasons": reasons,
+    }
+
+
+def build_recommendation(
+    session_id: str,
+    profile: dict[str, Any],
+    selected_categories: list[str],
+    repository: TaskRepository,
+    limit: int = 10,
+) -> dict[str, Any]:
+    constraints = profile["constraints"]
+    candidates = repository.search_tasks(
+        session_id=session_id,
+        budget_limit=constraints["budget_limit"],
+        max_duration=constraints["max_duration"],
+        outing=constraints["outing"],
+        company=constraints["company"],
+        categories=selected_categories,
+        scenarios=constraints.get("scenarios"),
+    )
+    result = recommend_tasks(
+        profile,
+        selected_categories,
+        candidates,
+        limit,
+    )
+    result["candidate_count"] = len(candidates)
+    result["constraints"] = constraints
+    return result
+
+
+if __name__ == "__main__":
+    repository = TaskRepository()
+    profile = {
+        "scores": {
+            "活力充电": 0.65,
+            "松弛疗愈": 0.90,
+            "自我成长": 0.70,
+        },
+        "constraints": {
+            "budget_limit": 50,
+            "max_duration": 90,
+            "outing": "nearby",
+            "company": "solo",
+            "scenarios": ["工作后精力不足"],
+        },
+    }
+    result = build_recommendation(
+        "session_001",
+        profile,
+        ["松弛疗愈", "活力充电", "自我成长"],
+        repository,
+        limit=6,
+    )
+    print(result)
+```
+
+独立文件中的完整实现使用 `Task` 数据类，返回任务详情、任务 ID、已覆盖分类、缺失分类、候选任务数量、硬约束和匹配理由。它不会生成任务库之外的任务 ID。
+
+### 7.5 验收点
+
+- 推荐结果不违反硬约束。
+- 推荐任务覆盖用户选择的方向，或明确返回缺口。
+- 推荐结果只引用任务库中的任务 ID。
+- 推荐失败时返回规则结果或可解释的无任务提示。
+- 推荐排序不改变 Task Repository 的任务数据。
+- 推荐理由能够说明任务分类、偏好分数、时长和预算。
+
+## 8. Scheduling Module：排程模块
+
+### 8.1 精简职责
+
+把推荐任务放入用户空闲时间，生成轻松、平衡和充实三种计划。
+
+### 8.2 同步工作流
+
+```text
+读取空闲时间
+→ 保留已完成任务
+→ 按密度选择候选任务
+→ 依次安排任务
+→ 插入休息块
+→ 检查冲突和总时长
+→ 保存计划草稿
+```
+
+### 8.3 最小示例代码
+
+```python
+def build_schedule(
+    tasks: list[dict],
+    start_at: datetime,
+    end_at: datetime,
+    density: str = "balanced",
+) -> list[dict]:
+    limits = {"light": 2, "balanced": 4, "full": 6}
+    cursor = start_at
+    result = []
+
+    for task in tasks[:limits[density]]:
+        task_end = cursor + timedelta(minutes=task["duration"])
+
+        if task_end > end_at:
+            continue
+
+        result.append({
+            "task_id": task["id"],
+            "title": task["title"],
+            "start_at": cursor,
+            "end_at": task_end,
+            "status": "pending",
+        })
+
+        cursor = task_end + timedelta(minutes=15)
+
+    return result
+```
+
+### 8.4 用户自定义任务校验
+
+```python
+def validate_time_change(
+    start_at: datetime,
+    duration_minutes: int,
+    free_start: datetime,
+    free_end: datetime,
+    existing_items: list[dict],
+) -> None:
+    end_at = start_at + timedelta(minutes=duration_minutes)
+
+    if start_at < free_start or end_at > free_end:
+        raise ValueError("任务超出可用时间")
+
+    for item in existing_items:
+        if start_at < item["end_at"] and end_at > item["start_at"]:
+            raise ValueError("任务时间发生冲突")
+```
+
+### 8.5 验收点
+
+- 任务不重叠。
+- 任务不超过空闲时间。
+- 至少保留一个低压力休息块。
+- 已完成任务不会在重排时被覆盖。
+- 修改冲突时保存失败并返回可用时间。
+
+## 9. Execution Module：执行模块
+
+### 9.1 精简职责
+
+记录任务开始、完成、跳过和超时，并触发“计划需要调整”状态。
+
+### 9.2 状态流转
+
+```text
+pending → active → completed
+pending → skipped
+pending → missed
+active  → overdue
+missed / overdue / skipped → needs_adjustment
+```
+
+### 9.3 同步工作流
+
+```text
+用户打开页面或点击操作
+→ 服务端读取当前时间
+→ 判断是否超时
+→ 校验状态转换
+→ 更新任务状态
+→ 写入执行事件
+→ 返回最新状态
+```
+
+### 9.4 最小示例代码
+
+```python
+ALLOWED = {
+    "pending": {"active", "skipped", "missed"},
+    "active": {"completed", "overdue", "skipped"},
+    "missed": {"needs_adjustment"},
+    "overdue": {"needs_adjustment"},
+    "skipped": {"needs_adjustment"},
+}
+
+def change_status(item: dict, action: str, current: datetime) -> dict:
+    status = item["status"]
+
+    if status == "pending" and current > item["end_at"]:
+        item["status"] = "missed"
+        status = "missed"
+
+    if status == "active" and current > item["end_at"]:
+        item["status"] = "overdue"
+        status = "overdue"
+
+    next_status = {
+        "start": "active",
+        "complete": "completed",
+        "skip": "skipped",
+    }.get(action)
+
+    if not next_status or next_status not in ALLOWED.get(status, set()):
+        raise ValueError(f"不允许从 {status} 执行 {action}")
+
+    item["status"] = next_status
+
+    if next_status in {"missed", "overdue", "skipped"}:
+        item["status"] = "needs_adjustment"
+
+    return item
+```
+
+### 9.5 验收点
+
+- 完成任务后不能再次开始。
+- 用户未开始或超时后显示“计划需要调整”。
+- 状态变化必须写入执行事件。
+- 超时判断不依赖后台任务。
+
+## 10. Feedback Module：反馈模块
+
+### 10.1 精简职责
+
+保存任务满意度和可选原因标签，为后续规则优化提供数据。
+
+### 10.2 同步工作流
+
+```text
+用户完成任务
+→ 提交 1-5 分满意度
+→ 可选选择原因标签
+→ 校验任务归属
+→ 保存 feedback
+```
+
+### 10.3 最小示例代码
+
+```python
+class FeedbackInput(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    reason_tags: list[str] = Field(default_factory=list, max_length=5)
+
+feedback_store: list[dict] = []
+
+@app.post("/api/v1/plans/{plan_id}/items/{item_id}/feedback")
+def submit_feedback(
+    plan_id: str,
+    item_id: str,
+    body: FeedbackInput,
+):
+    record = {
+        "id": new_id("feedback"),
+        "plan_id": plan_id,
+        "item_id": item_id,
+        "rating": body.rating,
+        "reason_tags": body.reason_tags,
+        "created_at": now_utc(),
+    }
+    feedback_store.append(record)
+    return {"data": record, "error": None}
+```
+
+### 10.4 验收点
+
+- 满意度只能为 1-5。
+- 原因标签可以不填写。
+- 用户只能提交自己计划中的任务反馈。
+- 反馈不改变已确认计划内容。
+
+## 11. 数据库设计
+
+### 11.1 核心表
+
+```text
+sessions
+preferences
+question_bank
+questionnaire_answers
+profiles
+tasks
+custom_tasks
+plans
+plan_items
+execution_events
+feedback
+```
+
+### 11.2 关键关系
+
+```text
+sessions 1 - 1 preferences
+sessions 1 - N questionnaire_answers
+sessions 1 - 1 profiles
+sessions 1 - N plans
+plans 1 - N plan_items
+plan_items 1 - N execution_events
+plan_items 1 - N feedback
+```
+
+### 11.3 计划版本规则
+
+- 首次生成保存为 `draft`。
+- 用户确认后变为 `confirmed`。
+- 重排创建新的 `plans` 记录。
+- 新计划通过 `parent_plan_id` 关联旧计划。
+- 已完成的 `plan_items` 在新版本中保留。
+
+## 12. API 总览
+
+```text
+POST   /api/v1/sessions
+GET    /api/v1/sessions/{session_id}
+DELETE /api/v1/sessions/{session_id}/data
+PUT    /api/v1/sessions/{session_id}/preferences
+
+POST   /api/v1/sessions/{session_id}/questionnaire/start
+PATCH  /api/v1/sessions/{session_id}/questionnaire/answers/{question_id}
+POST   /api/v1/sessions/{session_id}/questionnaire/submit
+
+POST   /api/v1/sessions/{session_id}/recommendations
+POST   /api/v1/sessions/{session_id}/plans/draft
+GET    /api/v1/plans/{plan_id}
+PATCH  /api/v1/plans/{plan_id}/items/{item_id}
+POST   /api/v1/plans/{plan_id}/replan
+POST   /api/v1/plans/{plan_id}/confirm
+POST   /api/v1/plans/{plan_id}/custom-tasks
+
+POST   /api/v1/plans/{plan_id}/items/{item_id}/start
+POST   /api/v1/plans/{plan_id}/items/{item_id}/complete
+POST   /api/v1/plans/{plan_id}/items/{item_id}/skip
+POST   /api/v1/plans/{plan_id}/items/{item_id}/feedback
+```
+
+统一返回：
+
+```json
+{
+  "requestId": "req_xxx",
+  "data": {},
+  "error": null
+}
+```
+
+## 13. 事务和错误处理
+
+### 13.1 事务要求
+
+- 创建计划时，`plans` 和 `plan_items` 必须在同一事务中写入。
+- 修改任务状态时，状态和 `execution_events` 必须在同一事务中写入。
+- 重排时创建新版本，不直接修改旧计划。
+- 使用计划版本号阻止旧页面覆盖新数据。
+
+### 13.2 主要错误
+
+| 场景 | 返回 |
+|---|---|
+| session 无效 | 401 |
+| 参数错误 | 400 |
+| 资源不属于当前 session | 403 |
+| 问卷未完成 | 409 |
+| 无符合条件任务 | 200 + 限制说明 |
+| 时间冲突 | 409 + 可用时间 |
+| 状态转换非法 | 409 + 当前状态 |
+| 计划版本冲突 | 409 + 要求刷新 |
+
+## 14. 安全和隐私
+
+- token 使用随机值，数据库保存哈希。
+- 每次请求校验 session 与资源归属。
+- 日志不记录原始 token、完整问卷答案和精确地址。
+- 城市或校园字段按普通文本处理，不获取精确定位。
+- 提供删除本次会话数据的接口。
+- 限制自定义任务标题、时长和标签数量。
+- 对创建会话、提交问卷和任务操作做基础限流。
+
+## 15. 测试要求
+
+### 15.1 单元测试
+
+- 四级量表转换。
+- 反向题计算。
+- 任务硬约束过滤。
+- 兴趣方向覆盖。
+- 时间冲突检测。
+- 计划密度选择。
+- 状态机转换。
+- 超时判断。
+
+### 15.2 接口测试
+
+- 创建和恢复 session。
+- 提交快速问卷。
+- 提交深度问卷。
+- 生成推荐。
+- 创建和确认计划。
+- 修改任务时间。
+- 添加自定义任务。
+- 开始、完成和跳过任务。
+- 重排后保留已完成任务。
+
+### 15.3 核心端到端测试
+
+```text
+创建 session
+→ 选择方向和条件
+→ 完成 5 题问卷
+→ 生成推荐
+→ 生成计划
+→ 修改任务时间
+→ 确认计划
+→ 开始任务
+→ 完成任务
+→ 提交反馈
+```
+
+## 16. 精简实施顺序
+
+### 阶段一：基础层
+
+- 初始化 FastAPI 项目。
+- 配置 PostgreSQL、SQLAlchemy 和 Alembic。
+- 建立统一响应和异常处理。
+- 完成 session 校验。
+
+### 阶段二：输入层
+
+- 完成 Session Module。
+- 完成 preferences 保存。
+- 完成 Questionnaire Module。
+- 完成答案保存和恢复。
+
+### 阶段三：推荐层
+
+- 导入人工审核任务库。
+- 完成 Profile Module。
+- 完成 Task Repository。
+- 完成规则版 Recommendation Module。
+
+### 阶段四：计划层
+
+- 完成 Scheduling Module。
+- 完成三种密度。
+- 完成时间调整和自定义任务。
+- 完成计划版本。
+
+### 阶段五：执行层
+
+- 完成 Execution Module。
+- 完成同步超时判断。
+- 完成重新排程和 Feedback Module。
+
+### 阶段六：验证上线
+
+- 执行单元测试、接口测试和端到端测试。
+- 在一个校园或城市导入任务库。
+- 小范围灰度运行。
+- 根据问卷完成率、计划确认率和任务完成率迭代。
+
+## 17. 最终后端工作流
+
+```text
+1. Session Module 创建匿名会话
+2. 前端提交兴趣方向和前置条件
+3. Questionnaire Module 返回 5 题或 30 题
+4. 用户答案同步保存到数据库
+5. Profile Module 计算结构化画像
+6. Task Repository 返回审核任务
+7. Recommendation Module 按硬约束和画像排序
+8. Agent 组合任务并生成匹配理由
+9. Scheduling Module 生成计划草稿
+10. 用户修改时间、替换任务或添加自定义任务
+11. 服务端校验冲突并保存计划版本
+12. 用户确认计划
+13. Execution Module 同步记录开始、完成、跳过和超时
+14. 任务异常时显示“计划需要调整”
+15. 用户选择重排、替换或暂不执行
+16. Feedback Module 保存满意度和原因标签
+```
+
+## 18. MVP 完成标准
+
+后端达到以下条件即可进入测试：
+
+- 全部核心接口使用同步调用完成。
+- 不依赖 MQ、Redis、Worker 或异步任务。
+- 用户无需注册即可完成规划。
+- 推荐结果遵守时间、预算、出行和同行约束。
+- 计划不存在时间冲突。
+- 用户可以修改计划和添加自定义任务。
+- 任务状态可以正确流转。
+- 超时可以在请求时被识别。
+- 重排不会覆盖已完成任务。
+- 所有核心状态变化都有可追踪记录。

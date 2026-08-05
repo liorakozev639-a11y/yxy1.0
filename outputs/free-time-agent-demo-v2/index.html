@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fb">
+    <title>空闲时间规划 Agent Demo V2</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header" id="top">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="brand-kicker">Demo V2</p>
+          <h1>空闲时间规划 Agent</h1>
+        </div>
+      </div>
+      <p class="status-chip" id="global-status" role="status" aria-live="polite">就绪</p>
+    </header>
+
+    <main class="app-shell" id="app" aria-live="polite">
+      <section class="shell-frame" aria-labelledby="page-title">
+        <div class="progress-row" aria-label="流程进度">
+          <div class="progress-meta">
+            <span id="stage-label">欢迎</span>
+            <span id="stage-count">1 / 8</span>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+        </div>
+
+        <section class="hero-panel">
+          <p class="eyebrow">独立骨架</p>
+          <h2 id="page-title">先把页面站稳，再往里面填流程。</h2>
+          <p class="lead">
+            这是一版只保留目录和页面结构的 Demo V2，后续任务会在这里补上活动库、问卷和排程。
+          </p>
+        </section>
+
+        <div class="stage-grid" role="list" aria-label="阶段容器">
+          <section class="stage-card" data-stage="welcome" role="listitem">
+            <h3>欢迎</h3>
+            <p>入口页与主行动按钮的占位。</p>
+          </section>
+          <section class="stage-card" data-stage="interests" role="listitem">
+            <h3>兴趣选择</h3>
+            <p>五个方向的选择与排序容器。</p>
+          </section>
+          <section class="stage-card" data-stage="conditions" role="listitem">
+            <h3>前置条件</h3>
+            <p>时长、预算、同行与节奏的占位区。</p>
+          </section>
+          <section class="stage-card" data-stage="questionnaire" role="listitem">
+            <h3>问卷</h3>
+            <p>单题推进与答案缓存的占位区。</p>
+          </section>
+          <section class="stage-card" data-stage="recommendations" role="listitem">
+            <h3>推荐</h3>
+            <p>候选活动与筛选结果的容器。</p>
+          </section>
+          <section class="stage-card" data-stage="plan" role="listitem">
+            <h3>计划</h3>
+            <p>半日时间线与调整入口。</p>
+          </section>
+          <section class="stage-card" data-stage="execution" role="listitem">
+            <h3>执行</h3>
+            <p>开始、完成、跳过和调整的容器。</p>
+          </section>
+          <section class="stage-card" data-stage="summary" role="listitem">
+            <h3>总结</h3>
+            <p>结果摘要和重启入口。</p>
+          </section>
+        </div>
+
+        <section class="stage-panel" aria-labelledby="stage-panel-title">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">当前阶段</p>
+              <h3 id="stage-panel-title">欢迎</h3>
+            </div>
+            <button class="button secondary" type="button" data-action="reset">
+              重新开始
+            </button>
+          </div>
+          <div class="stage-view" id="stage-view"></div>
+        </section>
+      </section>
+    </main>
+
+    <div id="live-region" class="sr-only" role="status" aria-live="polite"></div>
+    <div id="modal-root" hidden></div>
+
+    <script src="logic.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
