@@ -6,7 +6,7 @@ const {
   buildQuestions,
   buildCandidates,
   buildSchedule,
-} = require('../logic.js');
+} = require('../frontend/logic.js');
 
 test('allocates four ordered categories as 8/8/7/7', () => {
   assert.deepEqual(
