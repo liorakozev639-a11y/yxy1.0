@@ -938,81 +938,571 @@ if __name__ == "__main__":
 
 ## 8. Scheduling Module：排程模块
 
-### 8.1 精简职责
+### 8.1 职责与模块边界
 
-把推荐任务放入用户空闲时间，生成轻松、平衡和充实三种计划。
-
-### 8.2 同步工作流
+Scheduling Module 把 Recommendation Module 已经筛选并排序的任务放入用户空闲时间，生成可执行的计划草稿。它负责回答“什么时候做”，不重新决定“做什么”，也不负责记录任务是否完成。
 
 ```text
-读取空闲时间
-→ 保留已完成任务
-→ 按密度选择候选任务
-→ 依次安排任务
-→ 插入休息块
-→ 检查冲突和总时长
-→ 保存计划草稿
+Recommendation Module：决定推荐做什么
+→ Scheduling Module：决定任务何时开始、何时结束
+→ Execution Module：记录任务是否开始、完成、跳过或超时
 ```
 
-### 8.3 最小示例代码
+排程必须使用规则算法执行时间、冲突、密度和休息约束。Agent 可以解释排程理由，但不能绕过这些硬约束，也不能凭空生成任务 ID。
+
+### 8.2 输入与输出
+
+输入：
+
+- `session_id`：计划所属会话。
+- `tasks`：Recommendation Module 返回的推荐任务，包含任务 ID、分类、持续时间和匹配分。
+- `free_start`、`free_end`：用户本次空闲时间窗口。
+- `density`：`light`、`balanced` 或 `full`。
+- `locked_items`：已完成任务或用户明确锁定时间的任务。
+- `version`、`parent_plan_id`：重新排程时使用的计划版本信息。
+
+输出 `PlanDraft`：
+
+- `plan_id`、`session_id`、`density` 和版本信息。
+- 按开始时间排序的任务项与休息块。
+- 每个计划项的开始时间、结束时间、状态和锁定状态。
+- 因密度限制或时间不足而未放入计划的 `unscheduled_task_ids`。
+
+### 8.3 三档密度规则
+
+| 密度 | 最大任务数 | 任务间缓冲 | 插入休息时机 | 休息时长 |
+| --- | ---: | ---: | ---: | ---: |
+| `light` | 2 | 20 分钟 | 第 1 个任务后 | 30 分钟 |
+| `balanced` | 4 | 15 分钟 | 第 2 个任务后 | 20 分钟 |
+| `full` | 6 | 10 分钟 | 第 3 个任务后 | 15 分钟 |
+
+配置代表 MVP 初始规则，后续可以根据计划确认率、任务完成率和用户反馈调整，但接口枚举保持不变。
+
+### 8.4 同步工作流
+
+```text
+接收生成计划请求
+→ 校验 session_id、空闲时间、密度和任务字段
+→ 按匹配分、持续时间和任务 ID 确定稳定顺序
+→ 读取并校验已完成任务和用户锁定任务
+→ 从空闲窗口中扣除锁定时间和缓冲时间
+→ 根据密度计算还能安排的任务数量
+→ 使用 first-fit 规则把候选任务放入剩余时间段
+→ 在指定任务数量后插入休息块
+→ 若休息块无法放入，减少任务或尝试先安排休息
+→ 检查所有计划项是否越界或重叠
+→ 生成 unscheduled_task_ids
+→ 在同一数据库事务中保存 plan 和 plan_items
+→ 返回计划草稿
+```
+
+该算法是确定性的：相同输入产生相同任务顺序和时间安排。计划项 ID 和计划 ID 使用 UUID，因此每次生成的资源 ID 不同。
+
+### 8.5 排程算法原理
+
+1. **固定区间**：已完成任务和 `locked=True` 的任务不能移动。
+2. **计算空档**：从完整空闲窗口中扣除固定区间及任务缓冲，得到多个可用时间段。
+3. **稳定排序**：推荐任务按匹配分降序、持续时间升序、任务 ID 升序排列。
+4. **首次适配**：依次寻找第一个能容纳任务及后续缓冲的时间段。
+5. **强制休息**：每份计划必须有至少一个 `kind="rest"` 的休息块；空间不足时宁可少排任务。
+6. **最终校验**：任何越界、重叠、重复任务 ID、非法持续时间或非法分数都会使排程失败。
+
+无法排入计划的任务不会丢失，也不会被伪装成已安排任务，而是通过 `unscheduled_task_ids` 返回给前端。
+
+### 8.6 用户修改开始时间和持续时间
+
+`validate_time_change()` 在保存用户修改前执行三项检查：
+
+1. 持续时间必须大于 0。
+2. 新的开始和结束时间必须位于本次空闲窗口内。
+3. 新时间不能与其他任务或休息块重叠。
+
+重叠判断公式为：
 
 ```python
-def build_schedule(
-    tasks: list[dict],
-    start_at: datetime,
-    end_at: datetime,
-    density: str = "balanced",
-) -> list[dict]:
-    limits = {"light": 2, "balanced": 4, "full": 6}
-    cursor = start_at
-    result = []
+new_start < existing_end and new_end > existing_start
+```
 
-    for task in tasks[:limits[density]]:
-        task_end = cursor + timedelta(minutes=task["duration"])
+当修改当前计划项时，通过 `ignore_item_id` 排除它原来的时间，避免计划项与自身发生冲突。
 
-        if task_end > end_at:
+### 8.7 重新排程与计划版本
+
+`replan()` 不覆盖旧计划，而是创建新版本：
+
+```text
+读取旧计划
+→ 保留 status=completed 的任务
+→ 保留 locked=True 的任务
+→ 排除这些任务 ID，防止重复安排
+→ 只重新安排其余候选任务
+→ version + 1
+→ parent_plan_id 指向旧 plan_id
+→ 保存新计划和计划项
+```
+
+已完成任务在新版本中保留原计划项 ID、开始时间、结束时间、状态和锁定标记。
+
+### 8.8 建议 API
+
+```text
+POST  /api/v1/sessions/{session_id}/plans/draft
+PATCH /api/v1/plans/{plan_id}/items/{item_id}
+POST  /api/v1/plans/{plan_id}/replan
+POST  /api/v1/plans/{plan_id}/confirm
+GET   /api/v1/plans/{plan_id}
+```
+
+`POST .../plans/draft` 接收空闲窗口、密度和推荐任务 ID；`PATCH .../items/{item_id}` 修改开始时间或持续时间；`replan` 创建新版本；`confirm` 将草稿转为用户确认计划。
+
+### 8.9 PostgreSQL 保存规则
+
+排程计算本身保持为纯同步逻辑，计算成功后由 Repository 在同一事务中保存：
+
+```text
+BEGIN
+→ INSERT plans
+→ INSERT plan_items（任务、休息块和锁定项）
+→ 校验写入数量和当前版本
+→ COMMIT
+```
+
+任何计划项写入失败都必须回滚整个计划，不能留下只有 `plans`、没有完整 `plan_items` 的半成品。重新排程通过 `parent_plan_id` 保留版本链，不直接更新旧版本。
+
+### 8.10 完整运行代码
+
+完整文件：`scheduling_module.py`
+
+运行命令：
+
+```bash
+python scheduling_module.py
+```
+
+聚焦测试：
+
+```bash
+python -m unittest tests.test_scheduling_module -v
+```
+
+完整代码如下：
+
+```python
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Iterable
+
+
+class ScheduleError(ValueError):
+    """Raised when a valid schedule cannot be produced."""
+
+
+@dataclass(frozen=True, slots=True)
+class Task:
+    id: str
+    title: str
+    category: str
+    duration: int
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class PlanItem:
+    id: str
+    task_id: str | None
+    title: str
+    category: str | None
+    start_at: datetime
+    end_at: datetime
+    kind: str = "task"
+    status: str = "pending"
+    locked: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DensityConfig:
+    max_tasks: int
+    buffer_minutes: int
+    rest_after_tasks: int
+    rest_minutes: int
+
+
+@dataclass(frozen=True, slots=True)
+class PlanDraft:
+    plan_id: str
+    session_id: str
+    density: str
+    free_start: datetime
+    free_end: datetime
+    items: tuple[PlanItem, ...]
+    unscheduled_task_ids: tuple[str, ...]
+    version: int = 1
+    parent_plan_id: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "plan_id": self.plan_id,
+            "session_id": self.session_id,
+            "density": self.density,
+            "free_start": self.free_start.isoformat(),
+            "free_end": self.free_end.isoformat(),
+            "version": self.version,
+            "parent_plan_id": self.parent_plan_id,
+            "unscheduled_task_ids": list(self.unscheduled_task_ids),
+            "items": [
+                {
+                    "id": item.id,
+                    "task_id": item.task_id,
+                    "title": item.title,
+                    "category": item.category,
+                    "kind": item.kind,
+                    "status": item.status,
+                    "locked": item.locked,
+                    "start_at": item.start_at.isoformat(),
+                    "end_at": item.end_at.isoformat(),
+                }
+                for item in self.items
+            ],
+        }
+
+
+DENSITY_CONFIGS = {
+    "light": DensityConfig(2, 20, 1, 30),
+    "balanced": DensityConfig(4, 15, 2, 20),
+    "full": DensityConfig(6, 10, 3, 15),
+}
+
+
+@dataclass(slots=True)
+class _FreeSlot:
+    cursor: datetime
+    end_at: datetime
+
+
+def make_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def _validate_window(free_start: datetime, free_end: datetime) -> None:
+    if free_start >= free_end:
+        raise ScheduleError("空闲结束时间必须晚于开始时间")
+    if (free_start.tzinfo is None) != (free_end.tzinfo is None):
+        raise ScheduleError("开始时间和结束时间必须使用相同的时区格式")
+
+
+def _validate_tasks(tasks: list[Task]) -> None:
+    task_ids = [task.id for task in tasks]
+    if len(task_ids) != len(set(task_ids)):
+        raise ScheduleError("推荐任务中存在重复的任务 ID")
+    for task in tasks:
+        if not task.id or not task.title or not task.category:
+            raise ScheduleError("任务 ID、标题和分类不能为空")
+        if task.duration <= 0:
+            raise ScheduleError("任务持续时间必须大于 0")
+        if not 0 <= task.score <= 1:
+            raise ScheduleError("任务匹配分数必须在 0 到 1 之间")
+
+
+def _validate_locked_items(
+    items: list[PlanItem],
+    free_start: datetime,
+    free_end: datetime,
+) -> list[PlanItem]:
+    ordered = sorted(items, key=lambda item: (item.start_at, item.end_at, item.id))
+    for item in ordered:
+        if item.start_at >= item.end_at:
+            raise ScheduleError("锁定任务的结束时间必须晚于开始时间")
+        if item.start_at < free_start or item.end_at > free_end:
+            raise ScheduleError("锁定任务超出可用时间")
+    for left, right in zip(ordered, ordered[1:]):
+        if left.end_at > right.start_at:
+            raise ScheduleError("锁定任务之间存在时间冲突")
+    return ordered
+
+
+def _build_free_slots(
+    free_start: datetime,
+    free_end: datetime,
+    locked_items: list[PlanItem],
+    buffer_minutes: int,
+) -> list[_FreeSlot]:
+    buffer = timedelta(minutes=buffer_minutes)
+    cursor = free_start
+    slots: list[_FreeSlot] = []
+    for item in locked_items:
+        gap_end = item.start_at - buffer
+        if cursor < gap_end:
+            slots.append(_FreeSlot(cursor, gap_end))
+        cursor = max(cursor, item.end_at + buffer)
+    if cursor < free_end:
+        slots.append(_FreeSlot(cursor, free_end))
+    return slots
+
+
+def _copy_slots(slots: list[_FreeSlot]) -> list[_FreeSlot]:
+    return [_FreeSlot(slot.cursor, slot.end_at) for slot in slots]
+
+
+def _place(
+    slots: list[_FreeSlot],
+    duration_minutes: int,
+    following_buffer_minutes: int,
+) -> tuple[datetime, datetime] | None:
+    duration = timedelta(minutes=duration_minutes)
+    following_buffer = timedelta(minutes=following_buffer_minutes)
+    for slot in slots:
+        start_at = slot.cursor
+        end_at = start_at + duration
+        if end_at + following_buffer <= slot.end_at:
+            slot.cursor = end_at + following_buffer
+            return start_at, end_at
+    return None
+
+
+def _make_rest_item(start_at: datetime, end_at: datetime) -> PlanItem:
+    return PlanItem(
+        id=make_id("rest"),
+        task_id=None,
+        title="休息与自由调整",
+        category="松弛疗愈",
+        start_at=start_at,
+        end_at=end_at,
+        kind="rest",
+    )
+
+
+def _attempt_schedule(
+    tasks: list[Task],
+    base_slots: list[_FreeSlot],
+    config: DensityConfig,
+    task_limit: int,
+    rest_already_present: bool,
+    rest_first: bool,
+) -> list[PlanItem] | None:
+    slots = _copy_slots(base_slots)
+    created: list[PlanItem] = []
+    rest_added = rest_already_present
+
+    if rest_first and not rest_added:
+        position = _place(slots, config.rest_minutes, 0)
+        if position is None:
+            return None
+        created.append(_make_rest_item(*position))
+        rest_added = True
+
+    scheduled_count = 0
+    for task in tasks:
+        if scheduled_count >= task_limit:
+            break
+        position = _place(slots, task.duration, config.buffer_minutes)
+        if position is None:
             continue
+        created.append(
+            PlanItem(
+                id=make_id("item"),
+                task_id=task.id,
+                title=task.title,
+                category=task.category,
+                start_at=position[0],
+                end_at=position[1],
+            )
+        )
+        scheduled_count += 1
 
-        result.append({
-            "task_id": task["id"],
-            "title": task["title"],
-            "start_at": cursor,
-            "end_at": task_end,
-            "status": "pending",
-        })
+        if not rest_added and scheduled_count == config.rest_after_tasks:
+            rest_position = _place(slots, config.rest_minutes, 0)
+            if rest_position is not None:
+                created.append(_make_rest_item(*rest_position))
+                rest_added = True
 
-        cursor = task_end + timedelta(minutes=15)
+    if not rest_added:
+        rest_position = _place(slots, config.rest_minutes, 0)
+        if rest_position is None:
+            return None
+        created.append(_make_rest_item(*rest_position))
 
-    return result
-```
+    return created
 
-### 8.4 用户自定义任务校验
 
-```python
+def build_schedule(
+    session_id: str,
+    tasks: Iterable[Task],
+    free_start: datetime,
+    free_end: datetime,
+    density: str = "balanced",
+    *,
+    locked_items: Iterable[PlanItem] = (),
+    version: int = 1,
+    parent_plan_id: str | None = None,
+) -> PlanDraft:
+    if not session_id:
+        raise ScheduleError("session_id 不能为空")
+    if density not in DENSITY_CONFIGS:
+        raise ScheduleError("不支持的计划密度")
+    if version <= 0:
+        raise ScheduleError("计划版本必须大于 0")
+    _validate_window(free_start, free_end)
+
+    task_list = list(tasks)
+    _validate_tasks(task_list)
+    config = DENSITY_CONFIGS[density]
+    locked = _validate_locked_items(list(locked_items), free_start, free_end)
+    locked_task_ids = {
+        item.task_id for item in locked if item.kind == "task" and item.task_id
+    }
+    ranked = sorted(
+        (task for task in task_list if task.id not in locked_task_ids),
+        key=lambda task: (-task.score, task.duration, task.id),
+    )
+
+    base_slots = _build_free_slots(
+        free_start,
+        free_end,
+        locked,
+        config.buffer_minutes,
+    )
+    locked_task_count = sum(item.kind == "task" for item in locked)
+    maximum_new_tasks = max(0, config.max_tasks - locked_task_count)
+    rest_present = any(item.kind == "rest" for item in locked)
+
+    created: list[PlanItem] | None = None
+    for task_limit in range(maximum_new_tasks, -1, -1):
+        attempts = [
+            _attempt_schedule(
+                ranked,
+                base_slots,
+                config,
+                task_limit,
+                rest_present,
+                rest_first,
+            )
+            for rest_first in (False, True)
+        ]
+        valid_attempts = [attempt for attempt in attempts if attempt is not None]
+        if valid_attempts:
+            created = max(
+                valid_attempts,
+                key=lambda attempt: sum(item.kind == "task" for item in attempt),
+            )
+            break
+
+    if created is None:
+        raise ScheduleError("可用时间不足，无法保留休息块")
+
+    items = sorted(
+        [*locked, *created],
+        key=lambda item: (item.start_at, item.end_at, item.id),
+    )
+    for left, right in zip(items, items[1:]):
+        if left.end_at > right.start_at:
+            raise ScheduleError("生成的计划存在时间冲突")
+    if not any(item.kind == "rest" for item in items):
+        raise ScheduleError("计划必须包含至少一个休息块")
+
+    scheduled_task_ids = {
+        item.task_id for item in items if item.kind == "task" and item.task_id
+    }
+    unscheduled = tuple(
+        task.id
+        for task in task_list
+        if task.id not in scheduled_task_ids and task.id not in locked_task_ids
+    )
+    return PlanDraft(
+        plan_id=make_id("plan"),
+        session_id=session_id,
+        density=density,
+        free_start=free_start,
+        free_end=free_end,
+        items=tuple(items),
+        unscheduled_task_ids=unscheduled,
+        version=version,
+        parent_plan_id=parent_plan_id,
+    )
+
+
 def validate_time_change(
     start_at: datetime,
     duration_minutes: int,
     free_start: datetime,
     free_end: datetime,
-    existing_items: list[dict],
-) -> None:
+    existing_items: Iterable[PlanItem],
+    *,
+    ignore_item_id: str | None = None,
+) -> tuple[datetime, datetime]:
+    _validate_window(free_start, free_end)
+    if duration_minutes <= 0:
+        raise ScheduleError("任务持续时间必须大于 0")
     end_at = start_at + timedelta(minutes=duration_minutes)
-
     if start_at < free_start or end_at > free_end:
-        raise ValueError("任务超出可用时间")
-
+        raise ScheduleError("任务超出可用时间")
     for item in existing_items:
-        if start_at < item["end_at"] and end_at > item["start_at"]:
-            raise ValueError("任务时间发生冲突")
+        if item.id == ignore_item_id:
+            continue
+        if start_at < item.end_at and end_at > item.start_at:
+            raise ScheduleError(f"任务时间发生冲突: {item.id}")
+    return start_at, end_at
+
+
+def replan(
+    previous: PlanDraft,
+    tasks: Iterable[Task],
+    density: str | None = None,
+) -> PlanDraft:
+    locked = tuple(
+        item
+        for item in previous.items
+        if item.locked or item.status == "completed"
+    )
+    return build_schedule(
+        session_id=previous.session_id,
+        tasks=tasks,
+        free_start=previous.free_start,
+        free_end=previous.free_end,
+        density=density or previous.density,
+        locked_items=locked,
+        version=previous.version + 1,
+        parent_plan_id=previous.plan_id,
+    )
+
+
+def demo() -> None:
+    free_start = datetime(2026, 8, 6, 14, 0, tzinfo=timezone.utc)
+    tasks = [
+        Task("walk", "去公园散步", "活力充电", 40, 0.95),
+        Task("coffee", "喝咖啡放松", "松弛疗愈", 30, 0.90),
+        Task("read", "安静阅读", "自我成长", 45, 0.85),
+        Task("stretch", "居家拉伸", "活力充电", 20, 0.80),
+        Task("music", "听一张专辑", "乐享探索", 30, 0.75),
+    ]
+    draft = build_schedule(
+        session_id="sess_demo",
+        tasks=tasks,
+        free_start=free_start,
+        free_end=free_start + timedelta(hours=4),
+        density="balanced",
+    )
+    print(json.dumps(draft.to_dict(), ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    demo()
 ```
 
-### 8.5 验收点
+### 8.11 验收点
 
-- 任务不重叠。
-- 任务不超过空闲时间。
-- 至少保留一个低压力休息块。
-- 已完成任务不会在重排时被覆盖。
-- 修改冲突时保存失败并返回可用时间。
+- `light`、`balanced`、`full` 最多分别安排 2、4、6 个任务。
+- 所有计划项都位于 `free_start` 和 `free_end` 之间。
+- 任务和休息块不重叠，并保留密度要求的缓冲时间。
+- 每份计划至少包含一个休息块；时间不足时减少任务而不是删除休息。
+- 未安排任务通过 `unscheduled_task_ids` 返回。
+- 自定义时间越界或与其他计划项冲突时拒绝保存。
+- 已完成任务和用户锁定任务在重排时保持不变。
+- 重排生成新版本并记录 `parent_plan_id`。
+- 相同任务 ID 不会在同一个计划中重复出现。
+- 核心排程逻辑不依赖大模型、消息队列或内存会话仓储。
 
 ## 9. Execution Module：执行模块
 
