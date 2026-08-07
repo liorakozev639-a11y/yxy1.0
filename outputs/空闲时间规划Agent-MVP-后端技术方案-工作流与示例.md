@@ -1506,77 +1506,342 @@ if __name__ == "__main__":
 
 ## 9. Execution Module：执行模块
 
-### 9.1 精简职责
+### 9.1 模块职责与边界
 
-记录任务开始、完成、跳过和超时，并触发“计划需要调整”状态。
+Execution Module 不负责生成任务，也不负责重新排序时间。它接收 Scheduling Module 生成的 `PlanItem`，负责：
 
-### 9.2 状态流转
+1. 记录用户开始、完成和跳过操作。
+2. 使用服务端当前时间判断任务是否已经超时。
+3. 校验状态转换，防止完成后再次开始或重复完成。
+4. 写入 `execution_events`，保留状态变化历史。
+5. 在任务未开始、执行超时或主动跳过时返回 `needs_adjustment`，让前端提示用户调整计划。
 
-```text
-pending → active → completed
-pending → skipped
-pending → missed
-active  → overdue
-missed / overdue / skipped → needs_adjustment
-```
-
-### 9.3 同步工作流
+Scheduling Module 和 Execution Module 的分工如下：
 
 ```text
-用户打开页面或点击操作
-→ 服务端读取当前时间
-→ 判断是否超时
-→ 校验状态转换
-→ 更新任务状态
-→ 写入执行事件
-→ 返回最新状态
+Recommendation Module
+    → 提供候选任务
+Scheduling Module
+    → 生成 start_at、end_at 和 pending 状态的 PlanItem
+Execution Module
+    → 更新任务状态、记录事件、判断超时
+Feedback Module
+    → 收集完成后的满意度和原因标签
 ```
 
-### 9.4 最小示例代码
+Execution Module 在 MVP 中保持同步运行，不使用 MQ、Redis、Celery、后台 Worker 或大模型。
+
+### 9.2 数据模型
+
+| 对象 | 关键字段 | 作用 |
+|---|---|---|
+| `PlanItem` | `id`, `title`, `start_at`, `end_at`, `status` | 一条可执行计划任务 |
+| `ExecutionEvent` | `item_id`, `event_type`, `from_status`, `to_status`, `occurred_at` | 一次不可变的状态变化记录 |
+| `plan_items` | `status`, `start_at`, `end_at` | 保存当前任务状态 |
+| `execution_events` | `plan_item_id`, `event_type`, `occurred_at` | 保存执行历史，便于审计和反馈分析 |
+
+任务状态含义：
+
+| 状态 | 含义 |
+|---|---|
+| `pending` | 计划已生成，用户尚未开始 |
+| `active` | 用户已经开始执行 |
+| `completed` | 用户在截止时间前完成 |
+| `skipped` | 用户主动跳过的原始事件类型；当前状态统一进入 `needs_adjustment` |
+| `missed` | `pending` 任务到达结束时间仍未开始的事件类型 |
+| `overdue` | `active` 任务超过结束时间仍未完成的事件类型 |
+| `needs_adjustment` | 计划需要重新安排，前端应展示调整提示 |
+
+### 9.3 状态流转规则
+
+```text
+pending --start--> active --complete--> completed
+pending --skip--> needs_adjustment（事件类型 skipped）
+active  --skip--> needs_adjustment（事件类型 skipped）
+pending --到达 end_at--> needs_adjustment（事件类型 missed）
+active  --到达 end_at--> needs_adjustment（事件类型 overdue）
+```
+
+以下转换必须拒绝：
+
+- `pending` 不能直接 `complete`。
+- `completed` 不能再次 `start`、`complete` 或 `skip`。
+- `needs_adjustment` 不能继续执行原任务，必须先经过重新排程或替换。
+- `start` 早于 `start_at` 时拒绝，避免用户提前执行尚未到时间的任务。
+
+### 9.4 同步运行工作流
+
+```text
+前端点击“开始/完成/跳过”
+→ POST 执行接口
+→ 服务端读取数据库当前时间
+→ SELECT plan_items ... FOR UPDATE
+→ 判断当前任务是否已超过 end_at
+→ 若超时：写入 missed/overdue 事件并返回 needs_adjustment
+→ 若未超时：校验 action 是否允许
+→ 更新 plan_items.status
+→ 插入 execution_events
+→ 同一事务 COMMIT
+→ 返回最新任务状态和调整提示
+```
+
+超时检查不依赖后台定时任务。用户打开页面、刷新页面或发起执行请求时，都可以触发一次检查。检查函数是幂等的：已经进入 `needs_adjustment` 的任务不会重复添加超时事件。
+
+### 9.5 前后端接口约定
+
+前端可以使用以下同步接口：
+
+```text
+POST /api/v1/plan-items/{item_id}/start
+POST /api/v1/plan-items/{item_id}/complete
+POST /api/v1/plan-items/{item_id}/skip
+GET  /api/v1/plan-items/{item_id}
+```
+
+成功完成任务的响应：
+
+```json
+{
+  "data": {
+    "item_id": "item_001",
+    "status": "completed",
+    "needs_adjustment": false
+  },
+  "error": null
+}
+```
+
+任务超时的响应：
+
+```json
+{
+  "data": {
+    "item_id": "item_001",
+    "status": "needs_adjustment",
+    "needs_adjustment": true,
+    "event_type": "missed",
+    "message": "任务已超时，计划需要调整"
+  },
+  "error": null
+}
+```
+
+前端收到 `needs_adjustment: true` 后，展示“计划需要调整”，并提供重新排程、替换任务或暂时放弃三个动作。
+
+### 9.6 PostgreSQL 事务要求
+
+状态更新和事件写入必须处于同一个事务中，避免出现“任务状态已经改变，但事件没有记录”的不一致：
+
+```sql
+BEGIN;
+
+SELECT id, status, start_at, end_at
+FROM plan_items
+WHERE id = 'item_001'
+FOR UPDATE;
+
+UPDATE plan_items
+SET status = 'completed'
+WHERE id = 'item_001';
+
+INSERT INTO execution_events
+    (plan_item_id, event_type, occurred_at)
+VALUES
+    ('item_001', 'completed', NOW());
+
+COMMIT;
+```
+
+`FOR UPDATE` 会锁定当前任务行，防止两个并发请求同时修改同一个任务。实际服务层应使用数据库返回的当前行重新判断状态，不能信任前端传来的旧状态或客户端时间。
+
+### 9.7 完整可运行 Python 代码
+
+以下代码与仓库根目录的 `execution_module.py` 逻辑一致，可直接运行：
 
 ```python
-ALLOWED = {
-    "pending": {"active", "skipped", "missed"},
-    "active": {"completed", "overdue", "skipped"},
-    "missed": {"needs_adjustment"},
-    "overdue": {"needs_adjustment"},
-    "skipped": {"needs_adjustment"},
+"""Synchronous execution state machine for scheduled plan items."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+
+
+class ExecutionError(ValueError):
+    """Raised when an execution action is invalid or the item is not runnable."""
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionEvent:
+    item_id: str
+    event_type: str
+    from_status: str
+    to_status: str
+    occurred_at: datetime
+
+
+@dataclass(slots=True)
+class PlanItem:
+    id: str
+    title: str
+    start_at: datetime
+    end_at: datetime
+    status: str = "pending"
+    events: list[ExecutionEvent] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "start_at": self.start_at.isoformat(),
+            "end_at": self.end_at.isoformat(),
+            "status": self.status,
+            "needs_adjustment": self.status == "needs_adjustment",
+            "events": [
+                {
+                    **asdict(event),
+                    "occurred_at": event.occurred_at.isoformat(),
+                }
+                for event in self.events
+            ],
+        }
+
+
+ALLOWED_ACTIONS = {
+    "pending": {"start", "skip"},
+    "active": {"complete", "skip"},
 }
 
-def change_status(item: dict, action: str, current: datetime) -> dict:
-    status = item["status"]
 
-    if status == "pending" and current > item["end_at"]:
-        item["status"] = "missed"
-        status = "missed"
+def _validate_item(item: PlanItem) -> None:
+    if not item.id or not item.title:
+        raise ExecutionError("任务 ID 和标题不能为空")
+    if item.start_at >= item.end_at:
+        raise ExecutionError("任务结束时间必须晚于开始时间")
+    if item.status not in {
+        "pending",
+        "active",
+        "completed",
+        "skipped",
+        "missed",
+        "overdue",
+        "needs_adjustment",
+    }:
+        raise ExecutionError(f"不支持的任务状态: {item.status}")
 
-    if status == "active" and current > item["end_at"]:
-        item["status"] = "overdue"
-        status = "overdue"
 
-    next_status = {
-        "start": "active",
-        "complete": "completed",
-        "skip": "skipped",
-    }.get(action)
+def _validate_time(item: PlanItem, current: datetime) -> None:
+    if (item.start_at.tzinfo is None) != (current.tzinfo is None):
+        raise ExecutionError("任务时间和当前时间必须使用相同的时区格式")
 
-    if not next_status or next_status not in ALLOWED.get(status, set()):
-        raise ValueError(f"不允许从 {status} 执行 {action}")
 
-    item["status"] = next_status
+def _record_event(
+    item: PlanItem,
+    event_type: str,
+    old_status: str,
+    new_status: str,
+    current: datetime,
+) -> None:
+    item.events.append(
+        ExecutionEvent(
+            item_id=item.id,
+            event_type=event_type,
+            from_status=old_status,
+            to_status=new_status,
+            occurred_at=current,
+        )
+    )
 
-    if next_status in {"missed", "overdue", "skipped"}:
-        item["status"] = "needs_adjustment"
 
+def expire_if_needed(item: PlanItem, current: datetime) -> bool:
+    """Mark a pending or active item as needing adjustment after its deadline."""
+    _validate_item(item)
+    _validate_time(item, current)
+
+    if current < item.end_at:
+        return False
+
+    old_status = item.status
+    if item.status == "pending":
+        item.status = "needs_adjustment"
+        _record_event(item, "missed", old_status, item.status, current)
+        return True
+
+    if item.status == "active":
+        item.status = "needs_adjustment"
+        _record_event(item, "overdue", old_status, item.status, current)
+        return True
+
+    return False
+
+
+def execute_action(
+    item: PlanItem,
+    action: str,
+    current: datetime,
+) -> PlanItem:
+    """Apply ``start``, ``complete`` or ``skip`` to one plan item."""
+    _validate_item(item)
+
+    if expire_if_needed(item, current):
+        return item
+
+    old_status = item.status
+    if action not in ALLOWED_ACTIONS.get(old_status, set()):
+        raise ExecutionError(f"不允许从 {old_status} 执行 {action}")
+
+    if action == "start":
+        if current < item.start_at:
+            raise ExecutionError("任务尚未到开始时间")
+        item.status = "active"
+        event_type = "started"
+    elif action == "complete":
+        item.status = "completed"
+        event_type = "completed"
+    elif action == "skip":
+        item.status = "needs_adjustment"
+        event_type = "skipped"
+    else:
+        raise ExecutionError(f"不支持的操作: {action}")
+
+    _record_event(item, event_type, old_status, item.status, current)
     return item
+
+
+def demo() -> None:
+    tz = timezone.utc
+    start = datetime(2026, 8, 7, 14, 0, tzinfo=tz)
+    end = start + timedelta(minutes=40)
+
+    completed = PlanItem("item_001", "去公园散步", start, end)
+    execute_action(completed, "start", start + timedelta(minutes=5))
+    execute_action(completed, "complete", start + timedelta(minutes=30))
+
+    missed = PlanItem("item_002", "阅读 30 分钟", start, start + timedelta(minutes=30))
+    execute_action(missed, "start", start + timedelta(minutes=35))
+
+    print(json.dumps({
+        "completed_flow": completed.to_dict(),
+        "missed_flow": missed.to_dict(),
+    }, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    demo()
 ```
 
-### 9.5 验收点
+### 9.8 验收标准
 
-- 完成任务后不能再次开始。
-- 用户未开始或超时后显示“计划需要调整”。
-- 状态变化必须写入执行事件。
-- 超时判断不依赖后台任务。
+- `pending` 任务在开始时间前不能执行 `start`。
+- `pending` 任务超过 `end_at` 未开始时，自动变为 `needs_adjustment`，并记录 `missed` 事件。
+- `active` 任务超过 `end_at` 未完成时，自动变为 `needs_adjustment`，并记录 `overdue` 事件。
+- 正常执行必须遵守 `pending → active → completed`。
+- 完成任务后不能再次开始或完成。
+- 跳过任务必须记录 `skipped` 事件并触发计划调整。
+- 重复执行超时检查不会重复写入事件。
+- 每次状态变化和事件写入在同一个 PostgreSQL 事务中完成。
+- 核心逻辑不依赖后台 Worker、消息队列、Redis 或大模型。
 
 ## 10. Feedback Module：反馈模块
 
