@@ -10,6 +10,7 @@
 
 后端完成以下闭环：
 
+
 ```text
 匿名会话
 → 兴趣和前置条件
@@ -1843,7 +1844,385 @@ if __name__ == "__main__":
 - 每次状态变化和事件写入在同一个 PostgreSQL 事务中完成。
 - 核心逻辑不依赖后台 Worker、消息队列、Redis 或大模型。
 
-## 10. Feedback Module：反馈模块
+## 10. Delivery Module：网页交付模块
+
+### 10.1 MVP 范围
+
+Delivery Module 在本 MVP 中只负责网页展示，不实现 PDF 下载、邮件发送、日历写入或其他交付渠道。
+
+它将已生成的计划转换为前端可以直接消费的 JSON 视图模型，并在 PostgreSQL 中保存一次网页交付记录：
+
+```text
+Scheduling Module 生成 Plan
+→ Delivery Module 校验 session_id 和计划结构
+→ 按 start_at 排序任务
+→ 生成网页时间线 JSON
+→ PostgreSQL 幂等保存 delivery_jobs
+→ 返回 delivery_id 和网页 payload
+→ 前端渲染计划页面
+```
+
+### 10.2 数据模型
+
+| 对象 | 关键字段 | 作用 |
+|---|---|---|
+| `Plan` | `id`, `session_id`, `status`, `version`, `items` | 待展示的完整计划 |
+| `PlanItem` | `id`, `title`, `category`, `start_at`, `end_at`, `status` | 时间线中的一个任务 |
+| `WebDelivery` | `id`, `plan_id`, `session_id`, `channel`, `status`, `payload` | 一次网页展示交付结果 |
+| `delivery_jobs` | `plan_id`, `session_id`, `channel`, `status`, `payload_json` | 网页交付记录和幂等键 |
+
+`channel` 固定为 `web`，`status` 在 MVP 中使用 `ready` 或 `failed`。同一个 `session_id + plan_id + web` 组合只能有一条交付记录，重复请求更新 payload 但复用原 delivery ID。
+
+### 10.3 前后端交互流程
+
+推荐接口：
+
+```text
+POST /api/v1/plans/{plan_id}/deliver/web
+GET  /api/v1/plans/{plan_id}/view
+```
+
+具体流程：
+
+1. 前端请求网页交付接口，并携带当前会话 ID。
+2. 后端根据 `plan_id` 查询计划，确认计划属于该会话。
+3. 后端检查计划状态、任务 ID、任务时间和任务冲突。
+4. 后端按任务开始时间排序，生成网页时间线 JSON。
+5. 后端在 PostgreSQL 中执行幂等写入。
+6. 后端返回 `delivery_id`、`channel`、`status` 和 `payload`。
+7. 前端根据 `payload.items` 渲染任务卡片和时间轴。
+
+成功响应示例：
+
+```json
+{
+  "data": {
+    "delivery_id": "delivery_abc123",
+    "channel": "web",
+    "status": "ready",
+    "payload": {
+      "plan_id": "plan_001",
+      "title": "周六半日安排",
+      "items": []
+    }
+  },
+  "error": null
+}
+```
+
+### 10.4 PostgreSQL 表和事务
+
+```sql
+CREATE TABLE IF NOT EXISTS delivery_jobs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    channel TEXT NOT NULL CHECK (channel = 'web'),
+    status TEXT NOT NULL CHECK (status IN ('ready', 'failed')),
+    payload_json JSONB NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (session_id, plan_id, channel)
+);
+```
+
+交付记录保存和计划读取应在同一个数据库连接中完成；写入采用唯一约束保证幂等：
+
+```sql
+INSERT INTO delivery_jobs
+    (id, session_id, plan_id, channel, status, payload_json,
+     attempts, created_at, updated_at)
+VALUES
+    (%s, %s, %s, 'web', 'ready', %s::jsonb, 0, %s, %s)
+ON CONFLICT (session_id, plan_id, channel)
+DO UPDATE SET
+    status = 'ready',
+    payload_json = EXCLUDED.payload_json,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, session_id, plan_id, channel, status, payload_json, created_at;
+```
+
+### 10.5 完整可运行 Python 代码
+
+下面的代码与仓库根目录 `delivery_module.py` 逻辑一致。纯网页视图示例不需要外部服务即可运行；真正保存交付记录时使用 `PostgreSQLDeliveryRepository`，不使用生产内存仓储。
+
+```python
+"""Synchronous web delivery module for plan display."""
+
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Protocol
+
+try:
+    import psycopg
+except ImportError:  # pragma: no cover - allows the pure demo to run without psycopg
+    psycopg = None
+
+
+class DeliveryError(ValueError):
+    """Raised when a plan cannot be delivered as a web view."""
+
+
+@dataclass(frozen=True, slots=True)
+class PlanItem:
+    id: str
+    title: str
+    category: str
+    start_at: datetime
+    end_at: datetime
+    status: str = "pending"
+
+
+@dataclass(frozen=True, slots=True)
+class Plan:
+    id: str
+    session_id: str
+    title: str
+    status: str
+    version: int
+    items: tuple[PlanItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WebDelivery:
+    id: str
+    session_id: str
+    plan_id: str
+    channel: str
+    status: str
+    payload: dict[str, Any]
+    created_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "delivery_id": self.id,
+            "session_id": self.session_id,
+            "plan_id": self.plan_id,
+            "channel": self.channel,
+            "status": self.status,
+            "payload": self.payload,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+class WebDeliveryRepository(Protocol):
+    def save_or_get_web(
+        self,
+        *,
+        delivery_id: str,
+        session_id: str,
+        plan_id: str,
+        payload: dict[str, Any],
+        now: datetime,
+    ) -> WebDelivery:
+        """Persist one web delivery and return the idempotent record."""
+
+
+DELIVERY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS delivery_jobs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    channel TEXT NOT NULL CHECK (channel = 'web'),
+    status TEXT NOT NULL CHECK (status IN ('ready', 'failed')),
+    payload_json JSONB NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE (session_id, plan_id, channel)
+);
+"""
+
+
+def make_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def _validate_plan(session_id: str, plan: Plan) -> list[PlanItem]:
+    if not session_id:
+        raise DeliveryError("session_id 不能为空")
+    if plan.session_id != session_id:
+        raise DeliveryError("计划不属于当前会话")
+    if plan.status not in {"draft", "confirmed"}:
+        raise DeliveryError(f"当前计划状态不能展示: {plan.status}")
+    if plan.version <= 0:
+        raise DeliveryError("计划版本必须大于 0")
+    if not plan.items:
+        raise DeliveryError("计划至少需要包含一个任务")
+
+    ids = [item.id for item in plan.items]
+    if len(ids) != len(set(ids)):
+        raise DeliveryError("计划中存在重复的任务 ID")
+
+    ordered = sorted(plan.items, key=lambda item: (item.start_at, item.end_at, item.id))
+    for item in ordered:
+        if not item.id or not item.title or not item.category:
+            raise DeliveryError("任务 ID、标题和分类不能为空")
+        if item.start_at >= item.end_at:
+            raise DeliveryError("任务结束时间必须晚于开始时间")
+        if (item.start_at.tzinfo is None) != (item.end_at.tzinfo is None):
+            raise DeliveryError("任务开始和结束时间必须使用相同的时区格式")
+
+    for left, right in zip(ordered, ordered[1:]):
+        if left.end_at > right.start_at:
+            raise DeliveryError(f"任务时间冲突: {left.id} 与 {right.id}")
+    return ordered
+
+
+def build_web_payload(session_id: str, plan: Plan) -> dict[str, Any]:
+    """Build the JSON view model consumed by the frontend timeline."""
+    ordered = _validate_plan(session_id, plan)
+    return {
+        "channel": "web",
+        "view": "plan",
+        "session_id": session_id,
+        "plan_id": plan.id,
+        "title": plan.title,
+        "status": plan.status,
+        "version": plan.version,
+        "items": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "category": item.category,
+                "start_at": item.start_at.isoformat(),
+                "end_at": item.end_at.isoformat(),
+                "status": item.status,
+            }
+            for item in ordered
+        ],
+    }
+
+
+class WebDeliveryService:
+    """Orchestrate validation, view generation, and PostgreSQL persistence."""
+
+    def __init__(self, repository: WebDeliveryRepository) -> None:
+        self.repository = repository
+
+    def deliver(
+        self,
+        session_id: str,
+        plan: Plan,
+        now: datetime | None = None,
+    ) -> WebDelivery:
+        current = now or datetime.now(timezone.utc)
+        payload = build_web_payload(session_id, plan)
+        return self.repository.save_or_get_web(
+            delivery_id=make_id("delivery"),
+            session_id=session_id,
+            plan_id=plan.id,
+            payload=payload,
+            now=current,
+        )
+
+
+class PostgreSQLDeliveryRepository:
+    """PostgreSQL persistence adapter; no in-memory production store is used."""
+
+    def __init__(self, database_url: str) -> None:
+        if not database_url:
+            raise DeliveryError("database_url 不能为空")
+        if psycopg is None:
+            raise DeliveryError("运行 PostgreSQL 适配器需要安装 psycopg")
+        self.database_url = database_url
+
+    def save_or_get_web(
+        self,
+        *,
+        delivery_id: str,
+        session_id: str,
+        plan_id: str,
+        payload: dict[str, Any],
+        now: datetime,
+    ) -> WebDelivery:
+        query = """
+        INSERT INTO delivery_jobs
+            (id, session_id, plan_id, channel, status, payload_json,
+             attempts, created_at, updated_at)
+        VALUES (%s, %s, %s, 'web', 'ready', %s::jsonb, 0, %s, %s)
+        ON CONFLICT (session_id, plan_id, channel)
+        DO UPDATE SET
+            status = 'ready',
+            payload_json = EXCLUDED.payload_json,
+            updated_at = EXCLUDED.updated_at
+        RETURNING id, session_id, plan_id, channel, status,
+                  payload_json, created_at
+        """
+        with psycopg.connect(self.database_url) as connection:
+            row = connection.execute(
+                query,
+                (
+                    delivery_id,
+                    session_id,
+                    plan_id,
+                    json.dumps(payload, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            ).fetchone()
+        if row is None:
+            raise DeliveryError("网页交付记录保存失败")
+
+        stored_payload = row[5]
+        if isinstance(stored_payload, str):
+            stored_payload = json.loads(stored_payload)
+        return WebDelivery(
+            id=row[0],
+            session_id=row[1],
+            plan_id=row[2],
+            channel=row[3],
+            status=row[4],
+            payload=stored_payload,
+            created_at=row[6],
+        )
+
+
+def demo() -> None:
+    """Run the pure web-view part without contacting external services."""
+    tz = timezone.utc
+    start = datetime(2026, 8, 8, 10, 0, tzinfo=tz)
+    plan = Plan(
+        id="plan_demo",
+        session_id="sess_demo",
+        title="周六半日安排",
+        status="confirmed",
+        version=1,
+        items=(
+            PlanItem(
+                id="item_walk",
+                title="去公园散步",
+                category="活力充电",
+                start_at=start,
+                end_at=start.replace(minute=40),
+                status="pending",
+            ),
+        ),
+    )
+    print(json.dumps(build_web_payload("sess_demo", plan), ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    demo()
+```
+
+### 10.6 验收标准
+
+- 只返回网页展示所需 JSON，不创建 PDF、邮件或日历任务。
+- 交付前校验 session 与 plan 的归属。
+- 计划任务按 `start_at` 升序返回。
+- 空计划、重复任务 ID、任务时间冲突和非法计划状态必须拒绝。
+- 同一个会话重复展示同一个计划时，复用同一条 `delivery_jobs` 记录。
+- 网页交付状态为 `ready` 时，前端能够直接渲染 `payload.items`。
+- 状态和 payload 使用 PostgreSQL 保存，生产代码不使用内存仓储。
+- 交付流程保持同步，不依赖 MQ、异步 Worker 或第三方交付服务。
+
+## 11. Feedback Module：反馈模块
 
 ### 10.1 精简职责
 
@@ -1893,7 +2272,7 @@ def submit_feedback(
 - 用户只能提交自己计划中的任务反馈。
 - 反馈不改变已确认计划内容。
 
-## 11. 数据库设计
+## 12. 数据库设计
 
 ### 11.1 核心表
 
@@ -1931,7 +2310,7 @@ plan_items 1 - N feedback
 - 新计划通过 `parent_plan_id` 关联旧计划。
 - 已完成的 `plan_items` 在新版本中保留。
 
-## 12. API 总览
+## 13. API 总览
 
 ```text
 POST   /api/v1/sessions
@@ -1967,7 +2346,7 @@ POST   /api/v1/plans/{plan_id}/items/{item_id}/feedback
 }
 ```
 
-## 13. 事务和错误处理
+## 14. 事务和错误处理
 
 ### 13.1 事务要求
 
@@ -1989,7 +2368,7 @@ POST   /api/v1/plans/{plan_id}/items/{item_id}/feedback
 | 状态转换非法 | 409 + 当前状态 |
 | 计划版本冲突 | 409 + 要求刷新 |
 
-## 14. 安全和隐私
+## 15. 安全和隐私
 
 - token 使用随机值，数据库保存哈希。
 - 每次请求校验 session 与资源归属。
@@ -1999,7 +2378,7 @@ POST   /api/v1/plans/{plan_id}/items/{item_id}/feedback
 - 限制自定义任务标题、时长和标签数量。
 - 对创建会话、提交问卷和任务操作做基础限流。
 
-## 15. 测试要求
+## 16. 测试要求
 
 ### 15.1 单元测试
 
@@ -2039,7 +2418,7 @@ POST   /api/v1/plans/{plan_id}/items/{item_id}/feedback
 → 提交反馈
 ```
 
-## 16. 精简实施顺序
+## 17. 精简实施顺序
 
 ### 阶段一：基础层
 
@@ -2082,7 +2461,7 @@ POST   /api/v1/plans/{plan_id}/items/{item_id}/feedback
 - 小范围灰度运行。
 - 根据问卷完成率、计划确认率和任务完成率迭代。
 
-## 17. 最终后端工作流
+## 18. 最终后端工作流
 
 ```text
 1. Session Module 创建匿名会话
@@ -2103,7 +2482,7 @@ POST   /api/v1/plans/{plan_id}/items/{item_id}/feedback
 16. Feedback Module 保存满意度和原因标签
 ```
 
-## 18. MVP 完成标准
+## 19. MVP 完成标准
 
 后端达到以下条件即可进入测试：
 
