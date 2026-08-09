@@ -52,7 +52,7 @@ rg -n "plan/generate|questionnaire/submit|def build_orchestrator" main.py
 运行：
 
 ```powershell
-rg -n "yxy050621|postgres:[^<]|Bearer [A-Za-z0-9]" docs/MVP新增内容运行与调试指南.md
+rg -n "postgresql://postgres:[^<]|Bearer [A-Za-z0-9]" docs/MVP新增内容运行与调试指南.md
 ```
 
 预期：无输出。
@@ -118,4 +118,3 @@ git status --short
 ```
 
 预期：`session_module.py` 和 `questionnaire_module.py` 的既有未提交改动仍然存在，未被本次提交包含。
-
