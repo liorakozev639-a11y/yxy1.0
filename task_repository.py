@@ -283,7 +283,6 @@ class TaskRepository:
         ]
         return questions[:limit]
 
-"""判断任务是否符合出行范围和同行方式"""
     @staticmethod
     def _matches_outing(task: Task, user_outing: str) -> bool:
         allowed = {
@@ -301,7 +300,6 @@ class TaskRepository:
         if user_company not in {"solo", "group", "both"}:
             raise ValueError(f"不支持的同行方式: {user_company}")
         return user_company == "both" or task.company in {user_company, "both"}
-
 
 def demo() -> None:
 
@@ -344,10 +342,10 @@ def demo() -> None:
         limit=20,
     )
 
-    assert any(task.id == "custom_reading" for task in candidates)"""检查用户自定义的任务有没有被查询到"""
-    assert all(task.status == "approved" for task in candidates)"""检查所有候选任务都被审核过"""
-    assert len(questions) == 20"""检查题目数量""""
-    assert all(question.category in {"活力充电", "松弛疗愈"} for question in questions)"""检查题目分类是否正确"""
+    assert any(task.id == "custom_reading" for task in candidates)
+    assert all(task.status == "approved" for task in candidates)
+    assert len(questions) == 20
+    assert all(question.category in {"活力充电", "松弛疗愈"} for question in questions)
 
     print(f"公共活动数量: {len(PUBLIC_TASKS)}")
     print(f"五类活动数量: {dict(category_counts)}")
