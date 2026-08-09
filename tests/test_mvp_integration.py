@@ -132,7 +132,7 @@ class MVPIntegrationTests(unittest.TestCase):
             for question in questions
         ]
         preferences = {
-            "categories": list(CATEGORIES),
+            "categories": ["energy", "recovery", "social", "explore", "growth"],
             "duration": "half",
             "budget": "medium",
             "outing": "home",
