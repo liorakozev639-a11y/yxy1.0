@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Any, Literal, Optional
 
 import psycopg
@@ -18,7 +19,15 @@ from questionnaire_module import (
     PostgresQuestionnaireRepository,
     QuestionnaireService,
 )
+from delivery_module import PostgreSQLDeliveryRepository, WebDeliveryService
+from mvp_orchestrator import (
+    GeneratePlanRequest,
+    MVPOrchestrator,
+    PostgreSQLPlanRepository,
+    PostgreSQLProfileRepository,
+)
 from session_module import PostgresSessionRepository, SessionService
+from task_repository import TaskRepository
 
 
 ALLOWED_ORIGINS = [
@@ -45,7 +54,17 @@ class AnswerInput(BaseModel):
     value: int = Field(ge=1, le=4)
 
 
+class GeneratePlanInput(BaseModel):
+    free_start: datetime
+    free_end: datetime
+    density: Literal["light", "balanced", "full"] = "balanced"
+
+
 def success(data: Any) -> dict[str, Any]:
+    """
+
+    :rtype: dict[str, Any]
+    """
     return {"data": data, "error": None}
 
 
@@ -71,14 +90,36 @@ def build_services() -> tuple[SessionService, QuestionnaireService]:
     return session_service, questionnaire_service
 
 
+def build_orchestrator(
+    session_service: SessionService,
+    questionnaire_service: QuestionnaireService,
+) -> MVPOrchestrator:
+    database_url = os.getenv("SESSION_DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("启动整合服务前必须设置 SESSION_DATABASE_URL")
+    return MVPOrchestrator(
+        sessions=session_service,
+        questionnaire=questionnaire_service,
+        tasks=TaskRepository(),
+        profiles=PostgreSQLProfileRepository(database_url),
+        plans=PostgreSQLPlanRepository(database_url),
+        delivery=WebDeliveryService(
+            PostgreSQLDeliveryRepository(database_url),
+        ),
+    )
+
+
 def create_app(
     session_service: Optional[SessionService] = None,
     questionnaire_service: Optional[QuestionnaireService] = None,
+    orchestrator: Optional[MVPOrchestrator] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
     if session_service is None or questionnaire_service is None:
         session_service, questionnaire_service = build_services()
+    if orchestrator is None:
+        orchestrator = build_orchestrator(session_service, questionnaire_service)
 
     app = FastAPI(
         title="Free Time Agent API",
@@ -160,13 +201,14 @@ def create_app(
             session_id,
             body.model_dump(),
         )
-        return success(
+        s1 =  success(
             {
                 "saved": True,
                 "stage": session.stage,
                 "version": session.version,
             }
         )
+        return s1
 
     @app.delete("/api/v1/sessions/{session_id}/data")
     def clear_session_data(session_id: str) -> dict[str, Any]:
@@ -213,11 +255,39 @@ def create_app(
     def submit_questionnaire(session_id: str) -> dict[str, Any]:
         return success(questionnaire_service.submit(session_id))
 
+    @app.post("/api/v1/sessions/{session_id}/plan/generate")
+    def generate_plan(
+        session_id: str,
+        body: GeneratePlanInput,
+    ) -> dict[str, Any]:
+        return success(
+            orchestrator.generate_plan(
+                session_id,
+                GeneratePlanRequest(
+                    free_start=body.free_start,
+                    free_end=body.free_end,
+                    density=body.density,
+                ),
+            )
+        )
+
+    @app.get("/api/v1/sessions/{session_id}/plan")
+    def get_plan(session_id: str) -> dict[str, Any]:
+        plan = orchestrator.get_plan(session_id)
+        if plan is None:
+            raise HTTPException(status_code=404, detail="计划尚未生成")
+        return success(plan)
+
     return app
 
 
-app = create_app()
+app = create_app() if os.getenv("SESSION_DATABASE_URL") else FastAPI(
+    title="Free Time Agent API",
+    version="1.0.0",
+)
 
 
 if __name__ == "__main__":
+    if not os.getenv("SESSION_DATABASE_URL"):
+        raise RuntimeError("启动服务前必须设置 SESSION_DATABASE_URL")
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)

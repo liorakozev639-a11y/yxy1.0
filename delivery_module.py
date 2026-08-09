@@ -186,6 +186,8 @@ class PostgreSQLDeliveryRepository:
         if psycopg is None:
             raise DeliveryError("运行 PostgreSQL 适配器需要安装 psycopg")
         self.database_url = database_url
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(DELIVERY_SCHEMA_SQL)
 
     def save_or_get_web(
         self,

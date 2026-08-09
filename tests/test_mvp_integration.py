@@ -86,6 +86,19 @@ class FakeDeliveryService:
         return delivery
 
 
+class FakeOrchestrator:
+    def generate_plan(self, session_id, request):
+        return {
+            "profile": {"session_id": session_id},
+            "recommendation": {"covered_categories": []},
+            "plan": {"plan_id": "plan_api", "items": []},
+            "delivery": {"channel": "web", "status": "ready"},
+        }
+
+    def get_plan(self, session_id):
+        return {"plan_id": "plan_api", "session_id": session_id, "items": []}
+
+
 class MVPIntegrationTests(unittest.TestCase):
     def test_generate_plan_completes_profile_recommendation_schedule_delivery(self):
         now = datetime(2026, 8, 9, 10, 0, tzinfo=timezone.utc)
@@ -155,6 +168,44 @@ class MVPIntegrationTests(unittest.TestCase):
         self.assertTrue(result["plan"]["items"])
         self.assertTrue(any(item["kind"] == "rest" for item in result["plan"]["items"]))
         self.assertEqual(set(result["recommendation"]["covered_categories"]), set(CATEGORIES))
+
+    def test_api_exposes_generate_and_get_plan_routes(self):
+        from fastapi.testclient import TestClient
+        from main import create_app
+
+        client = TestClient(
+            create_app(
+                FakeSessionService({}),
+                FakeQuestionnaireService(
+                    FakeQuestionnaireRepository(
+                        QuestionnaireSession(
+                            session_id="sess_api",
+                            mode="quick",
+                            question_ids=[],
+                            submitted=True,
+                        ),
+                        [],
+                    ),
+                    [],
+                ),
+                FakeOrchestrator(),
+            )
+        )
+        generated = client.post(
+            "/api/v1/sessions/sess_api/plan/generate",
+            json={
+                "free_start": "2026-08-09T10:00:00Z",
+                "free_end": "2026-08-09T14:00:00Z",
+                "density": "balanced",
+            },
+        )
+        self.assertEqual(generated.status_code, 200)
+        self.assertEqual(generated.json()["data"]["delivery"]["channel"], "web")
+
+        restored = client.get("/api/v1/sessions/sess_api/plan")
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json()["data"]["plan_id"], "plan_api")
+        client.close()
 
 
 if __name__ == "__main__":
