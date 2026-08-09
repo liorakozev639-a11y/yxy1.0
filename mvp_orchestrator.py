@@ -19,7 +19,17 @@ from recommendation_module import recommend_tasks
 from scheduling_module import PlanDraft, PlanItem as ScheduleItem
 from scheduling_module import Task as ScheduleTask
 from scheduling_module import build_schedule
-from task_repository import TaskRepository
+from task_repository import CATEGORIES, TaskRepository
+
+
+CATEGORY_ALIASES = {
+    "energy": "活力充电",
+    "calm": "松弛疗愈",
+    "recovery": "松弛疗愈",
+    "social": "社交连接",
+    "explore": "乐享探索",
+    "growth": "自我成长",
+}
 
 
 def make_id(prefix: str) -> str:
@@ -363,7 +373,7 @@ class MVPOrchestrator:
         )
         profile_data = asdict(profile)
 
-        selected_categories = list(session.preferences.get("categories", []))
+        selected_categories = list(constraints["categories"])
         recommendation = self._recommend(profile_data, selected_categories)
         if recommendation["missing_categories"]:
             raise HTTPException(
@@ -428,8 +438,15 @@ class MVPOrchestrator:
         duration_values = {"half": 270, "day": 480}
         budget = preferences.get("budget", "medium")
         duration = preferences.get("duration", "half")
+        categories = [
+            CATEGORY_ALIASES.get(category, category)
+            for category in preferences.get("categories", [])
+        ]
+        if not categories or any(category not in CATEGORIES for category in categories):
+            raise HTTPException(status_code=400, detail="存在不支持的活动分类")
         return {
             **preferences,
+            "categories": categories,
             "budget_limit": budget_values.get(budget, 40),
             "max_duration": duration_values.get(duration, 270),
             "outing": preferences.get("outing", "any"),
@@ -457,4 +474,3 @@ class MVPOrchestrator:
                 for item in plan.items
             ),
         )
-

@@ -119,6 +119,19 @@
       });
     }
 
+    function generatePlan(input, sessionId) {
+      const current = requireSessionId(sessionId);
+      return request(`/api/v1/sessions/${current}/plan/generate`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function getPlan(sessionId) {
+      const current = requireSessionId(sessionId);
+      return request(`/api/v1/sessions/${current}/plan`);
+    }
+
     async function clearSession(sessionId) {
       const current = requireSessionId(sessionId);
       const data = await request(`/api/v1/sessions/${current}/data`, {
@@ -137,7 +150,9 @@
       createSession,
       forgetSession,
       getProgress,
+      getPlan,
       getSessionId,
+      generatePlan,
       restoreSession,
       saveAnswer,
       savePreferences,

@@ -152,6 +152,11 @@ h3 { margin-bottom: 4px; font-size: 17px; }
 .result-stat { min-height: 132px; padding: 18px; border-top: 3px solid var(--teal); background: var(--paper); box-shadow: var(--shadow); }
 .result-stat span { display: block; color: var(--muted); font-size: 13px; }
 .result-stat strong { display: block; margin-top: 18px; font-size: 30px; }
+.timeline-list { display: grid; gap: 12px; margin: 24px 0; }
+.timeline-list .timeline-item { padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.timeline-time { color: var(--teal-dark); font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.5; }
+.timeline-item strong, .timeline-item span { display: block; }
+.timeline-item span { margin-top: 5px; color: var(--muted); font-size: 13px; }
 .session-box { margin-top: 18px; padding: 16px 18px; border: 1px solid var(--line); background: var(--paper); }
 .session-box span { display: block; margin-bottom: 8px; color: var(--muted); font-size: 13px; }
 .session-box code { overflow-wrap: anywhere; color: var(--teal-dark); }

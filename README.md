@@ -8,7 +8,9 @@
 -> 选择快速版 5 题或深度版 30 题
 -> 自动保存、修改或跳过答案
 -> 刷新后恢复进度
--> 提交并显示问卷摘要
+-> 提交问卷
+-> 计算画像、筛选任务、生成排程
+-> 网页展示计划
 ```
 
 后端只使用 PostgreSQL，不提供内存模式；本地测试版只使用 `session_id`，不使用 Token 或 `Authorization`。
@@ -18,6 +20,7 @@
 - 后端唯一入口：`main.py`
 - 前端目录：`frontend`
 - 后端接口文档：`http://127.0.0.1:8000/docs`
+- 静态接口说明：`docs/api.md`
 - 前端页面：`http://127.0.0.1:5173/`
 
 不要再单独运行旧版 `session_module.py` 或 `questionnaire_module.py`，否则会占用端口或形成两套不共享状态的服务。
@@ -69,7 +72,7 @@ Set-Location "D:\yxy1.0"
   --port 8000
 ```
 
-打开 `http://127.0.0.1:8000/docs`，应看到 9 个业务接口。
+打开 `http://127.0.0.1:8000/docs`，应看到 Session、Questionnaire 和 Plan Generation 接口。
 
 如果提示 `8000` 被占用，先在 PyCharm 停止旧的 `session_module.py` 调试进程，再启动 `main.py`。
 
@@ -150,6 +153,14 @@ Invoke-RestMethod `
 
 第二个接口应继续返回 `answered_count = 1`，证明 Session、问卷和答案都来自 PostgreSQL，而不是进程内存。
 
+核心计划链路可在后端启动后执行：
+
+```powershell
+.\tests\live_core_flow.ps1
+```
+
+脚本会验证创建会话、保存偏好、提交问卷、画像、推荐、排程、网页交付和计划恢复。
+
 ## 9. 当前范围
 
-本轮没有接入 Profile、Task Repository、Recommendation、任务候选、计划排程、PDF 或邮件发送。这些模块不会出现在当前前端主流程中。
+当前已接入 Profile、Task Repository、Recommendation、Scheduling 和网页 Delivery。任务库仍是人工审核的通用活动，不调用实时地图、商户或活动 API。PDF、邮件、日历、Execution 和 Feedback 尚未接入主流程。

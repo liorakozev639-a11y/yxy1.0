@@ -63,6 +63,11 @@
     return categories.find((category) => category.id === id);
   }
 
+  function categoryIdByName(name) {
+    const category = categories.find((item) => item.name === name);
+    return category ? category.id : name;
+  }
+
   function header() {
     const current = stepNumbers[state.step] || 1;
     return `<div class="progress-row">
@@ -178,16 +183,26 @@
 
   function renderResult() {
     const result = state.result || {};
+    const plan = state.plan || {};
+    const items = Array.isArray(plan.items) ? plan.items : [];
+    const formatTime = (value) => {
+      if (!value) return '--:--';
+      return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
     return `<section class="screen result-screen">
-      <p class="eyebrow">第 5 步 · 联调结果</p>
-      <h1>这份偏好调查已经保存</h1>
-      <p class="lead">问卷结果已写入 PostgreSQL。当前测试版本在这里结束，不进入任务推荐与排程。</p>
+      <p class="eyebrow">第 5 步 · 你的留白安排</p>
+      <h1>这份时间，现在有了落点</h1>
+      <p class="lead">问卷、画像、任务推荐和时间排程已通过统一接口完成，并保存到 PostgreSQL。</p>
       <div class="result-grid">
         <div class="result-stat"><span>问卷模式</span><strong>${result.mode === 'deep' ? '深度版' : '快速版'}</strong></div>
         <div class="result-stat"><span>题目总数</span><strong>${result.total ?? 0}</strong></div>
         <div class="result-stat"><span>已回答</span><strong>${result.answered_count ?? 0}</strong></div>
         <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
       </div>
+      <div class="timeline-list">${items.map((item) => `<div class="timeline-item">
+        <div class="timeline-time">${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
+        <div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)}</span></div>
+      </div>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>
       <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
       <div class="actions"><span></span><div class="actions-right"><button class="button primary" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
     </section>`;
@@ -216,11 +231,12 @@
     state.answers = {};
     state.currentIndex = 0;
     state.result = null;
+    state.plan = null;
   }
 
   function buildPreferences() {
     return {
-      categories: [...state.selectedCategories],
+      categories: state.selectedCategories.map((id) => categoryById(id).name),
       duration: state.profile.timeMode,
       budget: state.profile.budget,
       outing: state.profile.outing,
@@ -231,7 +247,9 @@
   }
 
   function hydratePreferences(preferences) {
-    state.selectedCategories = Array.isArray(preferences.categories) ? preferences.categories : [];
+    state.selectedCategories = Array.isArray(preferences.categories)
+      ? preferences.categories.map(categoryIdByName)
+      : [];
     state.profile.timeMode = preferences.duration || state.profile.timeMode;
     state.profile.budget = preferences.budget || state.profile.budget;
     state.profile.outing = preferences.outing || state.profile.outing;
@@ -419,7 +437,16 @@
     }
     if (action === 'submit-questionnaire') {
       await runTask(async () => {
-        state.result = await api.submitQuestionnaire();
+      state.result = await api.submitQuestionnaire();
+        const freeStart = new Date();
+        freeStart.setSeconds(0, 0);
+        const freeEnd = new Date(freeStart.getTime() + (state.profile.timeMode === 'day' ? 8 : 4) * 60 * 60 * 1000);
+        const generated = await api.generatePlan({
+          free_start: freeStart.toISOString(),
+          free_end: freeEnd.toISOString(),
+          density: state.profile.pace === 'relaxed' ? 'light' : state.profile.pace === 'full' ? 'full' : 'balanced',
+        });
+        state.plan = generated.plan;
         state.step = 'result';
       });
       return;
