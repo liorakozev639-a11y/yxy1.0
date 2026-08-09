@@ -100,6 +100,23 @@ class FakeOrchestrator:
 
 
 class MVPIntegrationTests(unittest.TestCase):
+    def test_group_nearby_medium_tasks_cover_selected_categories(self):
+        selected_categories = ["松弛疗愈", "社交连接", "乐享探索"]
+
+        candidates = TaskRepository().search_tasks(
+            session_id="sess_group_nearby",
+            budget_limit=40,
+            max_duration=270,
+            outing="nearby",
+            company="group",
+            categories=selected_categories,
+        )
+
+        self.assertEqual(
+            {task.category for task in candidates},
+            set(selected_categories),
+        )
+
     def test_generate_plan_completes_profile_recommendation_schedule_delivery(self):
         now = datetime(2026, 8, 9, 10, 0, tzinfo=timezone.utc)
         questions = [
