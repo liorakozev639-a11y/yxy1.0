@@ -83,13 +83,13 @@ Run -> Edit Configurations -> + -> Python
 
 | 配置项 | 值 |
 | --- | --- |
-| Name | `MVP Backend Debug` |
-| Run kind | `Module name` |
-| Module name | `uvicorn` |
-| Parameters | `main:app --host 127.0.0.1 --port 8000` |
-| Interpreter | `D:\yxy1.0\.venv\Scripts\python.exe` |
-| Working directory | `D:\yxy1.0` |
-| Environment variables | `SESSION_DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5433/free_time_agent` |
+| 名称（Name） | `MVP Backend Debug` |
+| 运行类型（Run kind） | `模块名称（Module name）` |
+| 模块名称（Module name） | `uvicorn` |
+| 参数（Parameters） | `main:app --host 127.0.0.1 --port 8000` |
+| Python 解释器（Interpreter） | `D:\yxy1.0\.venv\Scripts\python.exe` |
+| 工作目录（Working directory） | `D:\yxy1.0` |
+| 环境变量（Environment variables） | `SESSION_DATABASE_URL=postgresql://postgres:<password>@127.0.0.1:5433/free_time_agent` |
 
 不要添加 `--reload`。重载模式会产生额外进程，断点可能无法命中。
 
