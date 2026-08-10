@@ -34,7 +34,7 @@
 - Read: `mvp_orchestrator.py`
 - Read: `delivery_module.py`
 - Read: `frontend/app.js`
-- Read: `frontend/api-client.js`
+- Read: `frontend/api.js`
 
 **Interfaces:**
 - Consumes: `main.py` 暴露的 Session、Questionnaire 和 Plan HTTP 路由。
@@ -68,7 +68,7 @@ rg -n "def (create|restore|save_preferences|start|save_answer|skip_question|prog
 rg -n "createSession|savePreferences|startQuestionnaire|saveAnswer|skipQuestion|progress|submitQuestionnaire|generatePlan|getPlan|clear" frontend
 ```
 
-预期：能够把页面动作映射到 `frontend/api-client.js` 的 HTTP 调用。
+预期：能够把页面动作映射到 `frontend/api.js` 的 HTTP 调用。
 
 ### Task 2: 编写十二阶段断点调试清单
 
