@@ -132,6 +132,48 @@
       return request(`/api/v1/sessions/${current}/plan`);
     }
 
+    function updatePlanItem(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}`, {
+        method: 'PATCH',
+        body: input,
+      });
+    }
+
+    function replacePlanItem(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/replace`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function skipPlanItem(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/skip`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function addCustomTask(planId, input) {
+      return request(`/api/v1/plans/${planId}/custom-tasks`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function confirmPlan(planId, input) {
+      return request(`/api/v1/plans/${planId}/confirm`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function replan(planId, input) {
+      return request(`/api/v1/plans/${planId}/replan`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
     async function clearSession(sessionId) {
       const current = requireSessionId(sessionId);
       const data = await request(`/api/v1/sessions/${current}/data`, {
@@ -147,6 +189,8 @@
 
     return {
       clearSession,
+      addCustomTask,
+      confirmPlan,
       createSession,
       forgetSession,
       getProgress,
@@ -154,11 +198,15 @@
       getSessionId,
       generatePlan,
       restoreSession,
+      replacePlanItem,
+      replan,
       saveAnswer,
       savePreferences,
       skipQuestion,
+      skipPlanItem,
       startQuestionnaire,
       submitQuestionnaire,
+      updatePlanItem,
     };
   }
 

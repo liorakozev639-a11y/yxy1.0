@@ -26,6 +26,7 @@ from mvp_orchestrator import (
     PostgreSQLPlanRepository,
     PostgreSQLProfileRepository,
 )
+from plan_module import PlanManagementService
 from session_module import PostgresSessionRepository, SessionService
 from task_repository import TaskRepository
 
@@ -60,6 +61,36 @@ class GeneratePlanInput(BaseModel):
     density: Literal["light", "balanced", "full"] = "balanced"
 
 
+class PlanItemTimeInput(BaseModel):
+    expected_version: int = Field(ge=1)
+    start_at: datetime
+    end_at: datetime
+
+
+class PlanItemMutationInput(BaseModel):
+    expected_version: int = Field(ge=1)
+
+
+class PlanReplaceInput(PlanItemMutationInput):
+    replacement_task_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class CustomTaskInput(BaseModel):
+    expected_version: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=128)
+    duration_minutes: int = Field(gt=0, le=480)
+    category: Optional[str] = None
+
+
+class PlanConfirmInput(BaseModel):
+    expected_version: int = Field(ge=1)
+
+
+class PlanReplanInput(BaseModel):
+    expected_version: int = Field(ge=1)
+    density: Optional[Literal["light", "balanced", "full"]] = None
+
+
 def success(data: Any) -> dict[str, Any]:
     """
 
@@ -76,6 +107,10 @@ def error_code(status_code: int) -> str:
         410: "session_expired",
         422: "validation_error",
     }.get(status_code, "request_failed")
+
+
+def _session_id_from_plan(manager: PlanManagementService, plan_id: str) -> str:
+    return manager.session_id_for_plan(plan_id)
 
 
 def build_services() -> tuple[SessionService, QuestionnaireService]:
@@ -113,6 +148,7 @@ def create_app(
     session_service: Optional[SessionService] = None,
     questionnaire_service: Optional[QuestionnaireService] = None,
     orchestrator: Optional[MVPOrchestrator] = None,
+    plan_service: Optional[PlanManagementService] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
@@ -120,6 +156,16 @@ def create_app(
         session_service, questionnaire_service = build_services()
     if orchestrator is None:
         orchestrator = build_orchestrator(session_service, questionnaire_service)
+    if (
+        plan_service is None
+        and os.getenv("SESSION_DATABASE_URL")
+        and isinstance(session_service, SessionService)
+    ):
+        plan_service = PlanManagementService(
+            os.environ["SESSION_DATABASE_URL"],
+            session_service,
+            orchestrator,
+        )
 
     app = FastAPI(
         title="Free Time Agent API",
@@ -273,10 +319,92 @@ def create_app(
 
     @app.get("/api/v1/sessions/{session_id}/plan")
     def get_plan(session_id: str) -> dict[str, Any]:
-        plan = orchestrator.get_plan(session_id)
+        plan = (
+            plan_service.get(session_id)
+            if plan_service is not None
+            else orchestrator.get_plan(session_id)
+        )
         if plan is None:
             raise HTTPException(status_code=404, detail="计划尚未生成")
         return success(plan)
+
+    def require_plan_service() -> PlanManagementService:
+        if plan_service is None:
+            raise HTTPException(status_code=503, detail="计划管理服务未配置")
+        return plan_service
+
+    @app.patch("/api/v1/plans/{plan_id}/items/{item_id}")
+    def edit_plan_item(
+        plan_id: str,
+        item_id: str,
+        body: PlanItemTimeInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        return success(
+            manager.edit_item(
+                session_id=_session_id_from_plan(manager, plan_id),
+                plan_id=plan_id,
+                item_id=item_id,
+                expected_version=body.expected_version,
+                start_at=body.start_at.isoformat(),
+                end_at=body.end_at.isoformat(),
+            )
+        )
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/replace")
+    def replace_plan_item(
+        plan_id: str,
+        item_id: str,
+        body: PlanReplaceInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            manager.replace_item(
+                session_id,
+                plan_id,
+                item_id,
+                body.expected_version,
+                body.replacement_task_id,
+            )
+        )
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/skip")
+    def skip_plan_item(
+        plan_id: str,
+        item_id: str,
+        body: PlanItemMutationInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(manager.skip_item(session_id, plan_id, item_id, body.expected_version))
+
+    @app.post("/api/v1/plans/{plan_id}/custom-tasks")
+    def add_custom_task(plan_id: str, body: CustomTaskInput) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            manager.add_custom_task(
+                session_id,
+                plan_id,
+                body.expected_version,
+                body.title,
+                body.duration_minutes,
+                body.category,
+            )
+        )
+
+    @app.post("/api/v1/plans/{plan_id}/confirm")
+    def confirm_plan(plan_id: str, body: PlanConfirmInput) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(manager.confirm(session_id, plan_id, body.expected_version))
+
+    @app.post("/api/v1/plans/{plan_id}/replan")
+    def replan(plan_id: str, body: PlanReplanInput) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(manager.replan(session_id, plan_id, body.expected_version, body.density))
 
     return app
 

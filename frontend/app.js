@@ -70,8 +70,9 @@
 
   function header() {
     const current = stepNumbers[state.step] || 1;
+    const pets = ['dog', 'pig', 'cat', 'rabbit', 'bear'];
     return `<div class="progress-row">
-      <span class="step-name">第 ${current} 步</span>
+      <span class="step-name"><span class="pixel-pet ${pets[current - 1]}" aria-hidden="true"></span>第 ${current} 步</span>
       <div class="progress-track"><div class="progress-bar" style="width:${current / 5 * 100}%"></div></div>
       <span class="step-count">${current} / 5</span>
     </div>`;
@@ -190,7 +191,7 @@
       return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
     return `<section class="screen result-screen">
-      <p class="eyebrow">第 5 步 · 你的留白安排</p>
+      <p class="eyebrow"><span class="pixel-pet rabbit" aria-hidden="true"></span>第 5 步 · 你的留白安排</p>
       <h1>这份时间，现在有了落点</h1>
       <p class="lead">问卷、画像、任务推荐和时间排程已通过统一接口完成，并保存到 PostgreSQL。</p>
       <div class="result-grid">
@@ -199,12 +200,16 @@
         <div class="result-stat"><span>已回答</span><strong>${result.answered_count ?? 0}</strong></div>
         <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
       </div>
-      <div class="timeline-list">${items.map((item) => `<div class="timeline-item">
+      <div class="timeline-list">${items.map((item) => `<div class="timeline-item ${item.status === 'skipped' ? 'is-skipped' : ''}">
         <div class="timeline-time">${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
-        <div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)}</span></div>
+        <div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${escapeHtml(item.status || 'pending')}</span><div class="timeline-actions">
+          <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>修改时间</button>
+          <button class="button ghost compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>替换</button>
+          <button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>跳过</button>
+        </div></div>
       </div>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>
       <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
-      <div class="actions"><span></span><div class="actions-right"><button class="button primary" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
+      <div class="actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已确认' : '确认计划'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
     </section>`;
   }
 
@@ -350,6 +355,7 @@
         if (destination === 'result') {
           state.mode = progress.mode;
           state.result = progress;
+          try { state.plan = await api.getPlan(); } catch (_) { state.plan = null; }
           state.step = 'result';
           return;
         }
@@ -448,6 +454,79 @@
         });
         state.plan = generated.plan;
         state.step = 'result';
+      });
+      return;
+    }
+    if (action === 'edit-plan-item') {
+      const plan = state.plan;
+      const item = plan && plan.items.find((entry) => entry.id === control.dataset.itemId);
+      if (!plan || !item) return;
+      const startInput = window.prompt('请输入开始时间（例如 2026-08-16T14:00）', item.start_at.slice(0, 16));
+      if (!startInput) return;
+      const endInput = window.prompt('请输入结束时间（例如 2026-08-16T14:40）', item.end_at.slice(0, 16));
+      if (!endInput) return;
+      await runTask(async () => {
+        state.plan = await api.updatePlanItem(plan.plan_id, item.id, {
+          expected_version: plan.version,
+          start_at: new Date(startInput).toISOString(),
+          end_at: new Date(endInput).toISOString(),
+        });
+      });
+      return;
+    }
+    if (action === 'replace-plan-item') {
+      const plan = state.plan;
+      if (!plan) return;
+      await runTask(async () => {
+        state.plan = await api.replacePlanItem(plan.plan_id, control.dataset.itemId, {
+          expected_version: plan.version,
+        });
+      });
+      return;
+    }
+    if (action === 'skip-plan-item') {
+      const plan = state.plan;
+      if (!plan) return;
+      await runTask(async () => {
+        state.plan = await api.skipPlanItem(plan.plan_id, control.dataset.itemId, {
+          expected_version: plan.version,
+        });
+      });
+      return;
+    }
+    if (action === 'add-custom-task') {
+      const plan = state.plan;
+      if (!plan) return;
+      const title = window.prompt('请输入自定义任务名称');
+      if (!title) return;
+      const duration = Number(window.prompt('请输入持续时间（分钟）', '30'));
+      if (!Number.isFinite(duration) || duration <= 0) return;
+      await runTask(async () => {
+        state.plan = await api.addCustomTask(plan.plan_id, {
+          expected_version: plan.version,
+          title,
+          duration_minutes: duration,
+          category: '自我成长',
+        });
+      });
+      return;
+    }
+    if (action === 'confirm-plan') {
+      const plan = state.plan;
+      if (!plan) return;
+      await runTask(async () => {
+        state.plan = await api.confirmPlan(plan.plan_id, { expected_version: plan.version });
+      });
+      return;
+    }
+    if (action === 'replan') {
+      const plan = state.plan;
+      if (!plan) return;
+      await runTask(async () => {
+        state.plan = await api.replan(plan.plan_id, {
+          expected_version: plan.version,
+          density: plan.density,
+        });
       });
       return;
     }
