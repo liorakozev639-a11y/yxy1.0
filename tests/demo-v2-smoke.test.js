@@ -94,14 +94,17 @@ test('canonical frontend loads the API client before the questionnaire app', () 
   const html = fs.readFileSync(path.join(frontendRoot, 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(frontendRoot, 'app.js'), 'utf8');
 
-  assert.ok(html.indexOf('<script src="api.js"></script>') >= 0);
+  const apiScript = html.match(/<script src="api\.js(?:\?[^\"]+)?"><\/script>/);
+  const flowScript = html.match(/<script src="flow\.js(?:\?[^\"]+)?"><\/script>/);
+  const appScript = html.match(/<script src="app\.js(?:\?[^\"]+)?"><\/script>/);
+  assert.ok(apiScript);
+  assert.ok(flowScript);
+  assert.ok(appScript);
   assert.ok(
-    html.indexOf('<script src="api.js"></script>')
-      < html.indexOf('<script src="flow.js"></script>'),
+    apiScript.index < flowScript.index,
   );
   assert.ok(
-    html.indexOf('<script src="flow.js"></script>')
-      < html.indexOf('<script src="app.js"></script>'),
+    flowScript.index < appScript.index,
   );
   assert.match(app, /window\.FreeTimeFlow/);
   assert.match(app, /booting/);

@@ -87,7 +87,7 @@
   }
 
   function renderBooting() {
-    return `<section class="status-screen">
+    return `<section class="status-screen pixel-screen">
       <span class="status-icon"><i data-lucide="loader-circle" aria-hidden="true"></i></span>
       <h1>正在恢复你的留白</h1>
       <p class="lead">正在连接本地服务并读取问卷进度。</p>
@@ -97,7 +97,7 @@
 
   function renderWelcome() {
     const hasSelection = state.selectedCategories.length > 0;
-    return `<section class="screen">
+    return `<section class="screen pixel-screen">
       <p class="eyebrow">为突然到来的自由时段，留一份清醒的安排</p>
       <h1>这段时间，你想把自己放在哪个方向？</h1>
       <p class="lead">选择一个或多个方向，我们会据此准备与你当前状态更相关的问题。</p>
@@ -120,7 +120,7 @@
   }
 
   function renderProfile() {
-    return `<section class="screen">
+    return `<section class="screen pixel-screen">
       <p class="eyebrow">第 2 步 · 可用条件</p>
       <h2>让安排适合你真正拥有的时间</h2>
       <p class="lead">条件会保存到当前会话，并用于筛选本次问卷。</p>
@@ -139,7 +139,7 @@
   }
 
   function renderMode() {
-    return `<section class="screen">
+    return `<section class="screen pixel-screen">
       <p class="eyebrow">第 3 步 · 问卷模式</p>
       <h2>今天想了解得多深入？</h2>
       <p class="lead">两种模式都可以随时刷新恢复，开始后本次会话将保持所选模式。</p>
@@ -167,7 +167,7 @@
     const answer = state.answers[question.id];
     const total = state.questions.length;
     const completed = handledCount() === total;
-    return `<section class="screen">
+    return `<section class="screen pixel-screen">
       <p class="eyebrow">第 4 步 · 空闲偏好小调查</p>
       <div class="quiz-layout">
         <div class="question-card">
@@ -190,26 +190,44 @@
       if (!value) return '--:--';
       return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
-    return `<section class="screen result-screen">
-      <p class="eyebrow"><span class="pixel-pet rabbit" aria-hidden="true"></span>第 5 步 · 你的留白安排</p>
-      <h1>这份时间，现在有了落点</h1>
-      <p class="lead">问卷、画像、任务推荐和时间排程已通过统一接口完成，并保存到 PostgreSQL。</p>
-      <div class="result-grid">
-        <div class="result-stat"><span>问卷模式</span><strong>${result.mode === 'deep' ? '深度版' : '快速版'}</strong></div>
-        <div class="result-stat"><span>题目总数</span><strong>${result.total ?? 0}</strong></div>
-        <div class="result-stat"><span>已回答</span><strong>${result.answered_count ?? 0}</strong></div>
-        <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
+    return `<section class="screen pixel-screen result-screen">
+      <div class="pixel-plan-hero">
+        <div>
+          <p class="eyebrow"><span class="pixel-pet rabbit" aria-hidden="true"></span>第 5 步 · 你的留白安排</p>
+          <h1>这份时间，现在有了落点</h1>
+          <p class="lead">问卷、画像、任务推荐和时间排程已通过统一接口完成，并保存到 PostgreSQL。</p>
+        </div>
+        <div class="pixel-hero-stamp" aria-label="计划已生成">PLAN<br><strong>READY</strong></div>
       </div>
-      <div class="timeline-list">${items.map((item) => `<div class="timeline-item ${item.status === 'skipped' ? 'is-skipped' : ''}">
-        <div class="timeline-time">${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
-        <div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${escapeHtml(item.status || 'pending')}</span><div class="timeline-actions">
-          <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>修改时间</button>
-          <button class="button ghost compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>替换</button>
-          <button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>跳过</button>
-        </div></div>
-      </div>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>
-      <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
-      <div class="actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已确认' : '确认计划'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
+      <div class="pixel-plan-layout">
+        <div class="pixel-plan-main">
+          <div class="pixel-section-label"><strong>今日任务时间线</strong><span>版本 v${escapeHtml(plan.version ?? 1)}</span></div>
+          <div class="result-grid pixel-stat-grid">
+            <div class="result-stat"><span>问卷模式</span><strong>${result.mode === 'deep' ? '深度版' : '快速版'}</strong></div>
+            <div class="result-stat"><span>题目总数</span><strong>${result.total ?? 0}</strong></div>
+            <div class="result-stat"><span>已回答</span><strong>${result.answered_count ?? 0}</strong></div>
+            <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
+          </div>
+          <div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item ${item.status === 'skipped' ? 'is-skipped' : ''}">
+            <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
+            <div class="pixel-task-content"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${escapeHtml(item.status || 'pending')}</span><div class="timeline-actions">
+              <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>修改时间</button>
+              <button class="button ghost compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>替换</button>
+              <button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>跳过</button>
+            </div></div>
+          </article>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>
+          <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
+          <div class="actions pixel-result-actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已确认' : '确认计划'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
+        </div>
+        <aside class="pixel-companion-panel">
+          <div class="pixel-companion-art"><span class="pixel-pet bear" aria-hidden="true"></span><span class="pixel-pet cat" aria-hidden="true"></span></div>
+          <span class="eyebrow">你的像素伙伴</span>
+          <h2>先完成一件，剩下的慢慢来。</h2>
+          <p>计划支持修改时间、替换任务和跳过任务。每次操作都会生成新的 PostgreSQL 计划版本。</p>
+          <div class="pixel-category-list">${state.selectedCategories.map((id) => `<span>${escapeHtml(categoryById(id)?.name || id)}</span>`).join('') || '<span>自由安排</span>'}</div>
+          <div class="pixel-status-note"><span class="pixel-dot"></span>${plan.status === 'confirmed' ? '计划已确认' : '计划草稿，可继续调整'}</div>
+        </aside>
+      </div>
     </section>`;
   }
 
