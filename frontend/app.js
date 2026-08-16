@@ -38,6 +38,9 @@
     busy: false,
     error: '',
     retryTask: null,
+    feedbackItemId: null,
+    feedbackRating: null,
+    feedbackReasons: [],
   };
   const stepNumbers = { welcome: 1, profile: 2, mode: 3, quiz: 4, result: 5 };
   let toastTimer;
@@ -182,6 +185,46 @@
     </section>`;
   }
 
+  function executionStatusLabel(status) {
+    return {
+      pending: '待开始',
+      active: '进行中',
+      completed: '已完成',
+      skipped: '已跳过',
+      missed: '已错过',
+      overdue: '已超时',
+      needs_adjustment: '需要调整',
+    }[status] || status || '待开始';
+  }
+
+  function feedbackPanel(item) {
+    if (state.feedbackItemId !== item.id) return '';
+    const reasons = ['容易开始', '符合当前状态', '下次还想做'];
+    return `<div class="pixel-feedback-panel">
+      <span class="feedback-label">这项任务怎么样？</span>
+      <div class="feedback-rating">${[1, 2, 3, 4, 5].map((rating) => `<button class="feedback-star ${state.feedbackRating === rating ? 'is-selected' : ''}" data-action="choose-feedback-rating" data-rating="${rating}" aria-label="${rating} 分">${rating}</button>`).join('')}</div>
+      <div class="feedback-reasons">${reasons.map((reason) => `<button class="feedback-reason ${state.feedbackReasons.includes(reason) ? 'is-selected' : ''}" data-action="toggle-feedback-reason" data-reason="${reason}">${reason}</button>`).join('')}</div>
+      <button class="button primary compact" data-action="save-feedback" ${state.feedbackRating ? '' : 'disabled'}>保存反馈</button>
+    </div>`;
+  }
+
+  function executionActions(item, plan) {
+    const disabled = state.busy ? 'disabled' : '';
+    if (item.status === 'pending') {
+      return `<button class="button primary compact" data-action="start-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>开始任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>`;
+    }
+    if (item.status === 'active') {
+      return `<button class="button primary compact" data-action="complete-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>完成任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>`;
+    }
+    if (item.status === 'completed') {
+      return `<button class="button secondary compact" data-action="open-feedback" data-item-id="${escapeHtml(item.id)}" ${disabled}>${state.feedbackItemId === item.id ? '收起反馈' : '任务反馈'}</button>`;
+    }
+    if (item.status === 'needs_adjustment' || item.status === 'missed' || item.status === 'overdue') {
+      return `<button class="button secondary compact" data-action="replan" ${disabled}>重新排程</button><button class="button ghost compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${disabled}>替换</button>`;
+    }
+    return `<span class="execution-status">${executionStatusLabel(item.status)}</span>`;
+  }
+
   function renderResult() {
     const result = state.result || {};
     const plan = state.plan || {};
@@ -208,13 +251,13 @@
             <div class="result-stat"><span>已回答</span><strong>${result.answered_count ?? 0}</strong></div>
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
-          <div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item ${item.status === 'skipped' ? 'is-skipped' : ''}">
+          <div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
             <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
-            <div class="pixel-task-content"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${escapeHtml(item.status || 'pending')}</span><div class="timeline-actions">
+            <div class="pixel-task-content"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span><div class="timeline-actions">
+              ${executionActions(item, plan)}
               <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>修改时间</button>
-              <button class="button ghost compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>替换</button>
-              <button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>跳过</button>
-            </div></div>
+              ${item.status === 'pending' || item.status === 'active' ? `<button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>编辑跳过</button>` : ''}
+            </div>${feedbackPanel(item)}</div>
           </article>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>
           <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
           <div class="actions pixel-result-actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已确认' : '确认计划'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
@@ -255,6 +298,9 @@
     state.currentIndex = 0;
     state.result = null;
     state.plan = null;
+    state.feedbackItemId = null;
+    state.feedbackRating = null;
+    state.feedbackReasons = [];
   }
 
   function buildPreferences() {
@@ -401,6 +447,18 @@
     }
   }
 
+  function applyExecutionPayload(payload) {
+    if (!state.plan || !payload || !payload.item) return;
+    state.plan = {
+      ...state.plan,
+      items: state.plan.items.map((item) => (
+        item.id === payload.item.id
+          ? { ...item, status: payload.item.status }
+          : item
+      )),
+    };
+  }
+
   app.addEventListener('click', async (event) => {
     const control = event.target.closest('[data-action]');
     if (!control || control.disabled) return;
@@ -472,6 +530,56 @@
         });
         state.plan = generated.plan;
         state.step = 'result';
+      });
+      return;
+    }
+    if (action === 'start-execution' || action === 'complete-execution' || action === 'skip-execution' || action === 'check-deadline') {
+      const plan = state.plan;
+      if (!plan) return;
+      const itemId = control.dataset.itemId;
+      const executionCall = action === 'start-execution'
+        ? api.startExecution
+        : action === 'complete-execution' ? api.completeExecution
+          : action === 'skip-execution' ? api.skipExecution : api.checkExecutionDeadline;
+      await runTask(async () => {
+        const payload = await executionCall(plan.plan_id, itemId, {});
+        applyExecutionPayload(payload);
+        showToast(action === 'start-execution' ? '任务已开始' : action === 'complete-execution' ? '任务已完成' : action === 'skip-execution' ? '任务已跳过，稍后可重新排程' : '已检查任务截止时间');
+      });
+      return;
+    }
+    if (action === 'open-feedback') {
+      state.feedbackItemId = state.feedbackItemId === control.dataset.itemId ? null : control.dataset.itemId;
+      state.feedbackRating = null;
+      state.feedbackReasons = [];
+      render();
+      return;
+    }
+    if (action === 'choose-feedback-rating') {
+      state.feedbackRating = Number(control.dataset.rating);
+      render();
+      return;
+    }
+    if (action === 'toggle-feedback-reason') {
+      const reason = control.dataset.reason;
+      state.feedbackReasons = state.feedbackReasons.includes(reason)
+        ? state.feedbackReasons.filter((item) => item !== reason)
+        : [...state.feedbackReasons, reason].slice(-3);
+      render();
+      return;
+    }
+    if (action === 'save-feedback') {
+      const plan = state.plan;
+      if (!plan || !state.feedbackItemId || !state.feedbackRating) return;
+      await runTask(async () => {
+        await api.saveFeedback(plan.plan_id, state.feedbackItemId, {
+          rating: state.feedbackRating,
+          reasons: state.feedbackReasons,
+        });
+        state.feedbackItemId = null;
+        state.feedbackRating = null;
+        state.feedbackReasons = [];
+        showToast('反馈已保存');
       });
       return;
     }

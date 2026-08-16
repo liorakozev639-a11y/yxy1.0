@@ -174,6 +174,40 @@
       });
     }
 
+    function executionRequest(planId, itemId, action, input = {}) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/execution/${action}`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function startExecution(planId, itemId, input = {}) {
+      return executionRequest(planId, itemId, 'start', input);
+    }
+
+    function completeExecution(planId, itemId, input = {}) {
+      return executionRequest(planId, itemId, 'complete', input);
+    }
+
+    function skipExecution(planId, itemId, input = {}) {
+      return executionRequest(planId, itemId, 'skip', input);
+    }
+
+    function checkExecutionDeadline(planId, itemId, input = {}) {
+      return executionRequest(planId, itemId, 'check-deadline', input);
+    }
+
+    function saveFeedback(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/feedback`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function getFeedback(planId) {
+      return request(`/api/v1/plans/${planId}/feedback`);
+    }
+
     async function clearSession(sessionId) {
       const current = requireSessionId(sessionId);
       const data = await request(`/api/v1/sessions/${current}/data`, {
@@ -190,9 +224,12 @@
     return {
       clearSession,
       addCustomTask,
+      checkExecutionDeadline,
+      completeExecution,
       confirmPlan,
       createSession,
       forgetSession,
+      getFeedback,
       getProgress,
       getPlan,
       getSessionId,
@@ -200,10 +237,13 @@
       restoreSession,
       replacePlanItem,
       replan,
+      saveFeedback,
       saveAnswer,
       savePreferences,
+      skipExecution,
       skipQuestion,
       skipPlanItem,
+      startExecution,
       startQuestionnaire,
       submitQuestionnaire,
       updatePlanItem,
