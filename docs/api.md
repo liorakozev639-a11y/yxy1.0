@@ -75,6 +75,76 @@ Swagger：`http://127.0.0.1:8000/docs`
 
 返回 `plan_id`、版本、时间范围、任务数组和未安排任务 ID。
 
+## Execution Loop
+
+计划生成并确认后，前端按任务状态调用执行接口。执行接口不需要登录令牌；服务端通过 `plan_id`、任务归属和会话有效期校验请求。
+
+请求体统一为可选的服务器时间覆盖字段。正常使用可传空对象 `{}`，调试或自动化验收时可传 ISO 8601 时间：
+
+```json
+{"now": "2026-08-09T10:05:00+08:00"}
+```
+
+### 开始任务
+
+`POST /api/v1/plans/{plan_id}/items/{item_id}/execution/start`
+
+`pending` 任务在开始时间到达后变为 `active`，并记录 `started` 事件。
+
+### 完成任务
+
+`POST /api/v1/plans/{plan_id}/items/{item_id}/execution/complete`
+
+`active` 任务变为 `completed`，并记录 `completed` 事件。
+
+### 跳过任务
+
+`POST /api/v1/plans/{plan_id}/items/{item_id}/execution/skip`
+
+将可执行任务变为 `needs_adjustment`，并记录 `skipped` 事件。它和计划编辑接口中的 `.../skip` 不同：前者表示执行阶段主动跳过，后者表示修改计划版本。
+
+### 检查任务截止时间
+
+`POST /api/v1/plans/{plan_id}/items/{item_id}/execution/check-deadline`
+
+当任务超过 `end_at` 仍未完成时，`pending` 任务记录 `missed`，`active` 任务记录 `overdue`，两者都会变为 `needs_adjustment`。重复检查不会重复产生事件。
+
+### 查询执行事件
+
+`GET /api/v1/plans/{plan_id}/execution/events?item_id={item_id}`
+
+`item_id` 可选；不传时返回整个计划的执行事件。
+
+## Feedback
+
+只有状态为 `completed` 的任务可以提交反馈。同一计划中的同一任务重复提交会更新原记录。
+
+### 保存任务反馈
+
+`POST /api/v1/plans/{plan_id}/items/{item_id}/feedback`
+
+```json
+{
+  "rating": 5,
+  "reasons": ["容易开始", "符合当前状态"]
+}
+```
+
+`rating` 为 1 到 5 的整数，`reasons` 可为空，最多 3 项。
+
+### 查询计划反馈
+
+`GET /api/v1/plans/{plan_id}/feedback`
+
+返回当前计划下已经提交的任务反馈列表。
+
+### 典型执行顺序
+
+```text
+生成计划 → 确认计划 → 开始任务 → 完成任务 → 提交反馈
+                         ↘ 超时检查 → needs_adjustment → 重新排程
+```
+
 ## 错误
 
 - `404`：会话或计划不存在。
@@ -82,4 +152,3 @@ Swagger：`http://127.0.0.1:8000/docs`
 - `410`：会话已过期。
 - `422`：请求字段校验失败。
 - `503`：PostgreSQL 暂不可用。
-
