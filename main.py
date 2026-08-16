@@ -20,6 +20,8 @@ from questionnaire_module import (
     QuestionnaireService,
 )
 from delivery_module import PostgreSQLDeliveryRepository, WebDeliveryService
+from execution_service import ExecutionService
+from feedback_service import FeedbackService
 from mvp_orchestrator import (
     GeneratePlanRequest,
     MVPOrchestrator,
@@ -91,6 +93,15 @@ class PlanReplanInput(BaseModel):
     density: Optional[Literal["light", "balanced", "full"]] = None
 
 
+class ExecutionTimeInput(BaseModel):
+    now: Optional[datetime] = None
+
+
+class FeedbackInput(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    reasons: list[str] = Field(default_factory=list, max_length=3)
+
+
 def success(data: Any) -> dict[str, Any]:
     """
 
@@ -149,6 +160,8 @@ def create_app(
     questionnaire_service: Optional[QuestionnaireService] = None,
     orchestrator: Optional[MVPOrchestrator] = None,
     plan_service: Optional[PlanManagementService] = None,
+    execution_service: Optional[ExecutionService] = None,
+    feedback_service: Optional[FeedbackService] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
@@ -165,6 +178,24 @@ def create_app(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
             orchestrator,
+        )
+    if (
+        execution_service is None
+        and os.getenv("SESSION_DATABASE_URL")
+        and isinstance(session_service, SessionService)
+    ):
+        execution_service = ExecutionService(
+            os.environ["SESSION_DATABASE_URL"],
+            session_service,
+        )
+    if (
+        feedback_service is None
+        and os.getenv("SESSION_DATABASE_URL")
+        and isinstance(session_service, SessionService)
+    ):
+        feedback_service = FeedbackService(
+            os.environ["SESSION_DATABASE_URL"],
+            session_service,
         )
 
     app = FastAPI(
@@ -333,6 +364,16 @@ def create_app(
             raise HTTPException(status_code=503, detail="计划管理服务未配置")
         return plan_service
 
+    def require_execution_service() -> ExecutionService:
+        if execution_service is None:
+            raise HTTPException(status_code=503, detail="执行服务未配置")
+        return execution_service
+
+    def require_feedback_service() -> FeedbackService:
+        if feedback_service is None:
+            raise HTTPException(status_code=503, detail="反馈服务未配置")
+        return feedback_service
+
     @app.patch("/api/v1/plans/{plan_id}/items/{item_id}")
     def edit_plan_item(
         plan_id: str,
@@ -405,6 +446,103 @@ def create_app(
         manager = require_plan_service()
         session_id = _session_id_from_plan(manager, plan_id)
         return success(manager.replan(session_id, plan_id, body.expected_version, body.density))
+
+    def execute_plan_item(
+        plan_id: str,
+        item_id: str,
+        action: str,
+        body: ExecutionTimeInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_execution_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            service.execute(
+                session_id,
+                plan_id,
+                item_id,
+                action,
+                now=body.now,
+            )
+        )
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/execution/start")
+    def start_execution(
+        plan_id: str,
+        item_id: str,
+        body: ExecutionTimeInput,
+    ) -> dict[str, Any]:
+        return execute_plan_item(plan_id, item_id, "start", body)
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/execution/complete")
+    def complete_execution(
+        plan_id: str,
+        item_id: str,
+        body: ExecutionTimeInput,
+    ) -> dict[str, Any]:
+        return execute_plan_item(plan_id, item_id, "complete", body)
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/execution/skip")
+    def skip_execution(
+        plan_id: str,
+        item_id: str,
+        body: ExecutionTimeInput,
+    ) -> dict[str, Any]:
+        return execute_plan_item(plan_id, item_id, "skip", body)
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/execution/check-deadline")
+    def check_execution_deadline(
+        plan_id: str,
+        item_id: str,
+        body: ExecutionTimeInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_execution_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            service.check_deadline(
+                session_id,
+                plan_id,
+                item_id,
+                now=body.now,
+            )
+        )
+
+    @app.get("/api/v1/plans/{plan_id}/execution/events")
+    def get_execution_events(
+        plan_id: str,
+        item_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_execution_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(service.events(session_id, plan_id, item_id))
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/feedback")
+    def save_feedback(
+        plan_id: str,
+        item_id: str,
+        body: FeedbackInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_feedback_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            service.save(
+                session_id,
+                plan_id,
+                item_id,
+                rating=body.rating,
+                reasons=body.reasons,
+            )
+        )
+
+    @app.get("/api/v1/plans/{plan_id}/feedback")
+    def list_feedback(plan_id: str) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_feedback_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(service.list_for_plan(session_id, plan_id))
 
     return app
 
