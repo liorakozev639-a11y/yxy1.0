@@ -11,7 +11,14 @@
   }
 }(typeof window !== 'undefined' ? window : null, function () {
   const STORAGE_KEY = 'free_time_agent_session_id';
-  const DEFAULT_BASE_URL = 'http://127.0.0.1:8000';
+  function defaultBaseUrl() {
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return 'http://127.0.0.1:8000';
+  }
+
+  const DEFAULT_BASE_URL = defaultBaseUrl();
 
   class ApiError extends Error {
     constructor(message, status, code, details) {

@@ -37,6 +37,11 @@ ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
 ]
+ALLOWED_ORIGINS.extend(
+    origin.strip()
+    for origin in os.getenv("FRONTEND_ORIGINS", "").split(",")
+    if origin.strip()
+)
 
 
 class PreferencesInput(BaseModel):
