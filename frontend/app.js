@@ -314,7 +314,7 @@
       </div>
       <div class="pixel-plan-layout">
         <div class="pixel-plan-main">
-          <div class="pixel-section-label"><strong>今日任务时间线</strong><span>版本 v${escapeHtml(plan.version ?? 1)}</span></div>
+          <div class="pixel-section-label"><strong>今日任务推荐时间线</strong><span>版本 v${escapeHtml(plan.version ?? 1)}</span></div>
           <div class="result-grid pixel-stat-grid">
             <div class="result-stat"><span>问卷模式</span><strong>${result.mode === 'deep' ? '深度版' : '快速版'}</strong></div>
             <div class="result-stat"><span>题目总数</span><strong>${result.total ?? 0}</strong></div>
@@ -322,24 +322,24 @@
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
           <div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
-            <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
+            <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
             <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}<div class="timeline-actions">
               ${executionActions(item, plan)}
               <button class="button ghost compact" data-action="open-detail" data-item-id="${escapeHtml(item.id)}">详情</button>
-              <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>修改时间</button>
+              <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>调整时间</button>
               ${item.status === 'pending' || item.status === 'active' ? `<button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>编辑跳过</button>` : ''}
             </div>${feedbackPanel(item)}</div>
           </article>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>
           <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
-          <div class="actions pixel-result-actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已确认' : '确认计划'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
+          <div class="actions pixel-result-actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已按流程执行' : '按此流程执行'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
         </div>
         <aside class="pixel-companion-panel">
           <div class="pixel-companion-art"><span class="pixel-pet bear" aria-hidden="true"></span><span class="pixel-pet cat" aria-hidden="true"></span></div>
           <span class="eyebrow">你的像素伙伴</span>
           <h2>先完成一件，剩下的慢慢来。</h2>
-          <p>计划支持修改时间、替换任务和跳过任务。每次操作都会生成新的 PostgreSQL 计划版本。</p>
+          <p>每个任务显示的是推荐时间，你可以先调整起止时间，再按当前流程执行；也可以提前开始或提前完成。</p>
           <div class="pixel-category-list">${state.selectedCategories.map((id) => `<span>${escapeHtml(categoryById(id)?.name || id)}</span>`).join('') || '<span>自由安排</span>'}</div>
-          <div class="pixel-status-note"><span class="pixel-dot"></span>${plan.status === 'confirmed' ? '计划已确认' : '计划草稿，可继续调整'}</div>
+          <div class="pixel-status-note"><span class="pixel-dot"></span>${plan.status === 'confirmed' ? '已按当前流程执行' : '计划草稿，可继续调整'}</div>
         </aside>
       </div>
       ${reasonModal(items)}

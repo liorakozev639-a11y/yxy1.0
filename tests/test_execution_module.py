@@ -35,9 +35,13 @@ class ExecutionModuleTest(unittest.TestCase):
         self.assertEqual(item.events[0].from_status, "pending")
         self.assertEqual(item.events[1].to_status, "completed")
 
-    def test_start_before_scheduled_time_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ExecutionError, "尚未到开始时间"):
-            execute_action(self.make_item(), "start", self.at(-1))
+    def test_pending_item_can_start_before_scheduled_time(self) -> None:
+        item = self.make_item()
+
+        execute_action(item, "start", self.at(-1))
+
+        self.assertEqual(item.status, "active")
+        self.assertEqual(item.events[-1].event_type, "started")
 
     def test_pending_item_becomes_missed_after_deadline(self) -> None:
         item = self.make_item()

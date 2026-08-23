@@ -145,8 +145,6 @@ def execute_action(
         raise ExecutionError(f"不允许从 {old_status} 执行 {action}")
 
     if action == "start":
-        if current < item.start_at:
-            raise ExecutionError("任务尚未到开始时间")
         item.status = "active"
         event_type = "started"
     elif action == "complete":

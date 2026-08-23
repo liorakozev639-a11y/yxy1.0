@@ -45,8 +45,11 @@ test('execution API methods use phase two routes', async () => {
   ]);
 });
 
-test('result view contains execution controls and feedback controls', () => {
+test('result view presents recommended times and execution controls', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+  assert.match(app, /推荐时间/);
+  assert.match(app, /按此流程执行/);
+  assert.match(app, /已按流程执行/);
   assert.match(app, /data-action="start-execution"/);
   assert.match(app, /data-action="complete-execution"/);
   assert.match(app, /data-action="skip-execution"/);
