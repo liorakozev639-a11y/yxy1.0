@@ -59,6 +59,47 @@ class PlanReplacementRuleTests(unittest.TestCase):
         self.assertEqual(updated["end_at"], current["end_at"])
         self.assertEqual(updated["status"], "pending")
 
+    def test_build_replaced_item_tracks_replacement_history(self) -> None:
+        current = {
+            "id": "item_old",
+            "task_id": "task_a",
+            "title": "旧任务",
+            "category": "乐享探索",
+            "start_at": "2026-08-23T10:00:00+00:00",
+            "end_at": "2026-08-23T10:30:00+00:00",
+            "kind": "task",
+            "status": "pending",
+            "locked": False,
+            "replacement_history": ["task_a"],
+        }
+        first_replacement = Task(
+            "task_b",
+            "找一家咖啡馆放空",
+            "乐享探索",
+            90,
+            40,
+            "nearby",
+            "both",
+        )
+        second_replacement = Task(
+            "task_c",
+            "在家制作一份简单甜品",
+            "乐享探索",
+            70,
+            40,
+            "home",
+            "solo",
+        )
+
+        replaced_once = build_replaced_item(current, first_replacement)
+        replaced_twice = build_replaced_item(replaced_once, second_replacement)
+
+        self.assertEqual(replaced_once["replacement_history"], ["task_a", "task_b"])
+        self.assertEqual(
+            replaced_twice["replacement_history"],
+            ["task_a", "task_b", "task_c"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

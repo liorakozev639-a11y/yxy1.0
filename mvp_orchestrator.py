@@ -196,7 +196,8 @@ class PostgreSQLPlanRepository:
                 end_at TIMESTAMPTZ NOT NULL,
                 kind TEXT NOT NULL,
                 status TEXT NOT NULL,
-                locked BOOLEAN NOT NULL DEFAULT FALSE
+                locked BOOLEAN NOT NULL DEFAULT FALSE,
+                replacement_history JSONB NOT NULL DEFAULT '[]'::jsonb
             )
             """,
         )
@@ -204,6 +205,9 @@ class PostgreSQLPlanRepository:
             with connection.cursor() as cursor:
                 for statement in statements:
                     cursor.execute(statement)
+                cursor.execute(
+                    "ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS replacement_history JSONB NOT NULL DEFAULT '[]'::jsonb"
+                )
 
     def save(self, plan: PlanDraft) -> PlanDraft:
         from psycopg.types.json import Jsonb
@@ -224,8 +228,8 @@ class PostgreSQLPlanRepository:
         item_query = """
         INSERT INTO plan_items (
             id, plan_id, task_id, title, category, start_at, end_at,
-            kind, status, locked
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            kind, status, locked, replacement_history
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, '[]'::jsonb)
         ON CONFLICT (id) DO UPDATE SET
             title = EXCLUDED.title,
             category = EXCLUDED.category,
@@ -233,7 +237,8 @@ class PostgreSQLPlanRepository:
             end_at = EXCLUDED.end_at,
             kind = EXCLUDED.kind,
             status = EXCLUDED.status,
-            locked = EXCLUDED.locked
+            locked = EXCLUDED.locked,
+            replacement_history = EXCLUDED.replacement_history
         """
         with self._connect() as connection:
             with connection.cursor() as cursor:

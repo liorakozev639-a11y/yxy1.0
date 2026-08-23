@@ -83,13 +83,26 @@ def select_replacement_task(
     return None
 
 
+def normalize_replacement_history(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(task_id) for task_id in value if task_id]
+    return []
+
+
 def build_replaced_item(current: dict[str, Any], replacement: Task) -> dict[str, Any]:
     updated = dict(current)
+    replacement_history = normalize_replacement_history(current.get("replacement_history"))
+    for task_id in (current.get("task_id"), replacement.id):
+        if task_id and task_id not in replacement_history:
+            replacement_history.append(task_id)
     updated.update(
         task_id=replacement.id,
         title=replacement.title,
         category=replacement.category,
         status="pending",
+        replacement_history=replacement_history,
     )
     return updated
 
@@ -105,6 +118,9 @@ def enrich_plan_item_payload(item: dict[str, Any], task: Task | None = None) -> 
         "kind": item["kind"],
         "status": item["status"],
         "locked": bool(item["locked"]),
+        "replacement_history": normalize_replacement_history(
+            item.get("replacement_history")
+        ),
     }
     if item["kind"] != "task":
         payload["reason_tags"] = ["自由调整", "低压力友好"]
@@ -144,6 +160,9 @@ class PlanManagementService:
             connection.execute(
                 "ALTER TABLE plans ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'"
             )
+            connection.execute(
+                "ALTER TABLE plan_items ADD COLUMN IF NOT EXISTS replacement_history JSONB NOT NULL DEFAULT '[]'::jsonb"
+            )
 
     def get(self, session_id: str, plan_id: str | None = None) -> dict[str, Any] | None:
         self.sessions.require_active(session_id)
@@ -177,7 +196,7 @@ class PlanManagementService:
                 cursor.execute(
                     """
                     SELECT id, task_id, title, category, start_at, end_at,
-                           kind, status, locked
+                           kind, status, locked, replacement_history
                     FROM plan_items
                     WHERE plan_id = %s
                     ORDER BY start_at, end_at, id
@@ -306,8 +325,8 @@ class PlanManagementService:
                     """
                     INSERT INTO plan_items
                         (id, plan_id, task_id, title, category, start_at, end_at,
-                         kind, status, locked)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         kind, status, locked, replacement_history)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         item["id"],
@@ -320,6 +339,7 @@ class PlanManagementService:
                         item["kind"],
                         item["status"],
                         item["locked"],
+                        Jsonb(normalize_replacement_history(item.get("replacement_history"))),
                     ),
                 )
         refreshed = self.get(plan["session_id"], new_plan_id)
@@ -366,6 +386,7 @@ class PlanManagementService:
             for item in plan["items"]
             if item["task_id"]
         }
+        used_ids.update(normalize_replacement_history(current.get("replacement_history")))
         candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
         candidate = select_replacement_task(
             candidates=candidates,
@@ -421,6 +442,7 @@ class PlanManagementService:
                 "kind": "task",
                 "status": "pending",
                 "locked": True,
+                "replacement_history": [],
             }
         )
         return self._save_version(plan, items)
