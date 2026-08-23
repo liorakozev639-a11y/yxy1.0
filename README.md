@@ -11,6 +11,8 @@
 -> 提交问卷
 -> 计算画像、筛选任务、生成排程
 -> 网页展示计划
+-> 调整任务时间并按流程执行
+-> 记录任务开始、完成、跳过与反馈
 ```
 
 后端只使用 PostgreSQL，不提供内存模式；本地测试版只使用 `session_id`，不使用 Token 或 `Authorization`。
@@ -72,7 +74,7 @@ Set-Location "D:\yxy1.0"
   --port 8000
 ```
 
-打开 `http://127.0.0.1:8000/docs`，应看到 Session、Questionnaire 和 Plan Generation 接口。
+打开 `http://127.0.0.1:8000/docs`，应看到 Session、Questionnaire、Profile、Plan、Execution 和 Feedback 接口。
 
 如果提示 `8000` 被占用，先在 PyCharm 停止旧的 `session_module.py` 调试进程，再启动 `main.py`。
 
@@ -161,6 +163,25 @@ Invoke-RestMethod `
 
 脚本会验证创建会话、保存偏好、提交问卷、画像、推荐、排程、网页交付和计划恢复。
 
-## 9. 当前范围
+## 9. 计划执行与时间调整
 
-当前已接入 Profile、Task Repository、Recommendation、Scheduling 和网页 Delivery。任务库仍是人工审核的通用活动，不调用实时地图、商户或活动 API。PDF、邮件、日历、Execution 和 Feedback 尚未接入主流程。
+计划生成后，时间线中的每个时间段都是系统的**推荐时间**，不是强制时间。用户可按以下顺序使用：
+
+1. 点击任务旁的“调整时间”，修改开始时间和结束时间。
+2. 后端会校验结束时间晚于开始时间、任务不重叠且不超出本次可用时间。
+3. 调整完成后，点击“按此流程执行”确认当前计划版本。
+4. 任务可以提前开始、提前完成；如果任务已经超过结束时间仍未处理，系统会将其标记为“需要调整”。
+
+前端对应操作：
+
+- “开始任务”：可早于推荐开始时间执行。
+- “完成任务”：可早于推荐结束时间执行。
+- “跳过”：将任务标记为需要调整。
+- “重新排程”：为需要调整的任务重新生成安排。
+- “任务反馈”：完成任务后记录评分与原因标签。
+
+每次调整时间、替换任务、跳过任务或确认计划，都会生成新的 PostgreSQL 计划版本；前端会使用接口返回的最新版本继续操作，避免旧页面覆盖新数据。
+
+## 10. 当前范围
+
+当前主流程已接入 Profile、Task Repository、Recommendation、Scheduling、网页 Delivery、Execution 和 Feedback。任务库仍是人工审核的通用活动，不调用实时地图、商户或活动 API。PDF、邮件和日历同步暂不在 MVP 范围内。
