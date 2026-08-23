@@ -15,6 +15,7 @@ from delivery_module import PlanItem as DeliveryPlanItem
 from delivery_module import WebDeliveryService
 from profile_module import Answer as ProfileAnswer
 from profile_module import Profile, ProfileService, Question as ProfileQuestion
+from profile_module import build_profile_insight
 from recommendation_module import recommend_tasks
 from scheduling_module import PlanDraft, PlanItem as ScheduleItem
 from scheduling_module import Task as ScheduleTask
@@ -343,41 +344,10 @@ class MVPOrchestrator:
         session_id: str,
         request: GeneratePlanRequest,
     ) -> dict[str, Any]:
-        session = self.sessions.require_active(session_id)
-        questionnaire = self.questionnaire.repository.get_questionnaire(session_id)
-        if questionnaire is None or not questionnaire.submitted:
-            raise HTTPException(status_code=409, detail="问卷尚未提交")
-
-        questions = [
-            self.questionnaire.questions[question_id]
-            for question_id in questionnaire.question_ids
-        ]
-        answers = self.questionnaire.repository.get_answers(session_id)
-        profile_questions = [
-            ProfileQuestion(
-                id=question.id,
-                dimension=question.dimension,
-                reverse_scored=question.reverse_scored,
-            )
-            for question in questions
-        ]
-        profile_answers = [
-            ProfileAnswer(
-                question_id=answer.question_id,
-                value=answer.value,
-                skipped=answer.skipped,
-            )
-            for answer in answers
-        ]
-        constraints = self._normalize_preferences(session.preferences)
-        profile = ProfileService(self.profiles).build(
-            session_id=session_id,
-            questions=profile_questions,
-            answers=profile_answers,
-            preferences=constraints,
-        )
+        profile = self._build_profile(session_id)
         profile_data = asdict(profile)
 
+        constraints = profile.constraints
         selected_categories = list(constraints["categories"])
         recommendation = self._recommend(profile_data, selected_categories)
         if recommendation["missing_categories"]:
@@ -418,10 +388,49 @@ class MVPOrchestrator:
             "delivery": delivery.to_dict() if hasattr(delivery, "to_dict") else delivery,
         }
 
+    def build_profile_insight(self, session_id: str) -> dict[str, Any]:
+        profile = self._build_profile(session_id)
+        return build_profile_insight(profile)
+
     def get_plan(self, session_id: str) -> Optional[dict[str, Any]]:
         self.sessions.require_active(session_id)
         plan = self.plans.get(session_id)
         return plan.to_dict() if plan is not None else None
+
+    def _build_profile(self, session_id: str) -> Profile:
+        session = self.sessions.require_active(session_id)
+        questionnaire = self.questionnaire.repository.get_questionnaire(session_id)
+        if questionnaire is None or not questionnaire.submitted:
+            raise HTTPException(status_code=409, detail="问卷尚未提交")
+
+        questions = [
+            self.questionnaire.questions[question_id]
+            for question_id in questionnaire.question_ids
+        ]
+        answers = self.questionnaire.repository.get_answers(session_id)
+        profile_questions = [
+            ProfileQuestion(
+                id=question.id,
+                dimension=question.dimension,
+                reverse_scored=question.reverse_scored,
+            )
+            for question in questions
+        ]
+        profile_answers = [
+            ProfileAnswer(
+                question_id=answer.question_id,
+                value=answer.value,
+                skipped=answer.skipped,
+            )
+            for answer in answers
+        ]
+        constraints = self._normalize_preferences(session.preferences)
+        return ProfileService(self.profiles).build(
+            session_id=session_id,
+            questions=profile_questions,
+            answers=profile_answers,
+            preferences=constraints,
+        )
 
     def _recommend(self, profile: dict[str, Any], categories: list[str]) -> dict[str, Any]:
         constraints = profile["constraints"]

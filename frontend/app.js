@@ -35,6 +35,7 @@
     answers: {},
     currentIndex: 0,
     result: null,
+    profileInsight: null,
     busy: false,
     error: '',
     retryTask: null,
@@ -43,7 +44,7 @@
     feedbackRating: null,
     feedbackReasons: [],
   };
-  const stepNumbers = { welcome: 1, profile: 2, mode: 3, quiz: 4, result: 5 };
+  const stepNumbers = { welcome: 1, profile: 2, mode: 3, quiz: 4, insight: 5, result: 6 };
   let toastTimer;
 
   function escapeHtml(value) {
@@ -76,9 +77,9 @@
     const current = stepNumbers[state.step] || 1;
     const pets = ['dog', 'pig', 'cat', 'rabbit', 'bear'];
     return `<div class="progress-row">
-      <span class="step-name"><span class="pixel-pet ${pets[current - 1]}" aria-hidden="true"></span>第 ${current} 步</span>
-      <div class="progress-track"><div class="progress-bar" style="width:${current / 5 * 100}%"></div></div>
-      <span class="step-count">${current} / 5</span>
+      <span class="step-name"><span class="pixel-pet ${pets[(current - 1) % pets.length]}" aria-hidden="true"></span>第 ${current} 步</span>
+      <div class="progress-track"><div class="progress-bar" style="width:${current / 6 * 100}%"></div></div>
+      <span class="step-count">${current} / 6</span>
     </div>`;
   }
 
@@ -183,6 +184,46 @@
         </div>
         <aside class="quiz-summary"><span class="eyebrow">完成进度</span><strong>${handledCount()} / ${total}</strong><div class="progress-track"><div class="progress-bar" style="width:${handledCount() / total * 100}%"></div></div><div class="mini-list"><div class="mini-row"><span>模式</span><span>${state.mode === 'quick' ? '快速版' : '深度版'}</span></div><div class="mini-row"><span>刷新恢复</span><span>已开启</span></div></div></aside>
       </div>
+    </section>`;
+  }
+
+  function renderInsight() {
+    const insight = state.profileInsight || {};
+    const dimensions = Array.isArray(insight.top_dimensions) ? insight.top_dimensions : [];
+    const cards = Array.isArray(insight.constraint_cards) ? insight.constraint_cards : [];
+    const suggestions = Array.isArray(insight.suggestions) ? insight.suggestions : [];
+    return `<section class="screen pixel-screen profile-insight-screen">
+      <div class="pixel-plan-hero">
+        <div>
+          <p class="eyebrow"><span class="pixel-pet bear" aria-hidden="true"></span>第 5 步 · 问卷结果解释</p>
+          <h1>你的空闲偏好画像</h1>
+          <p class="lead">${escapeHtml(insight.summary || '问卷已提交，我们正在整理你的偏好画像。')}</p>
+        </div>
+        <div class="pixel-hero-stamp" aria-label="画像已生成">PROFILE<br><strong>READY</strong></div>
+      </div>
+      <div class="profile-insight-grid">
+        <section class="profile-insight-card profile-insight-card-main">
+          <span class="eyebrow">偏好排序</span>
+          <div class="insight-bars">${dimensions.map((item) => `<div class="insight-bar-row">
+            <div class="insight-bar-label"><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.level || '')}</span></div>
+            <div class="insight-bar-track"><span style="width:${Math.round(Number(item.score || 0) * 100)}%"></span></div>
+            <p>${escapeHtml(item.text || '')}</p>
+          </div>`).join('') || '<p class="lead">暂无可展示的偏好分数。</p>'}</div>
+        </section>
+        <aside class="profile-insight-card">
+          <span class="eyebrow">约束条件</span>
+          <div class="constraint-card-list">${cards.map((card) => `<div class="constraint-card">
+            <span>${escapeHtml(card.label)}</span>
+            <strong>${escapeHtml(card.value)}</strong>
+            <p>${escapeHtml(card.text)}</p>
+          </div>`).join('')}</div>
+        </aside>
+      </div>
+      <div class="profile-insight-card suggestion-panel">
+        <span class="eyebrow">生成计划前的建议</span>
+        <div class="suggestion-list">${suggestions.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>
+      </div>
+      <div class="actions"><button class="button ghost" data-action="go-mode" ${state.busy ? 'disabled' : ''}>返回问卷选择</button><div class="actions-right"><button class="button primary" data-action="generate-plan" ${state.busy ? 'disabled' : ''}>生成计划<i data-lucide="arrow-right"></i></button></div></div>
     </section>`;
   }
 
@@ -305,6 +346,7 @@
       profile: renderProfile,
       mode: renderMode,
       quiz: renderQuiz,
+      insight: renderInsight,
       result: renderResult,
     };
     const body = renderers[state.step]();
@@ -321,6 +363,7 @@
     state.answers = {};
     state.currentIndex = 0;
     state.result = null;
+    state.profileInsight = null;
     state.plan = null;
     state.feedbackItemId = null;
     state.detailItemId = null;
@@ -445,7 +488,12 @@
           state.mode = progress.mode;
           state.result = progress;
           try { state.plan = await api.getPlan(); } catch (_) { state.plan = null; }
-          state.step = 'result';
+          if (state.plan) {
+            state.step = 'result';
+          } else {
+            state.profileInsight = await api.getProfileInsight();
+            state.step = 'insight';
+          }
           return;
         }
         const started = await api.startQuestionnaire(progress.mode);
@@ -484,6 +532,19 @@
     };
   }
 
+  async function generateCurrentPlan() {
+    const freeStart = new Date();
+    freeStart.setSeconds(0, 0);
+    const freeEnd = new Date(freeStart.getTime() + (state.profile.timeMode === 'day' ? 8 : 4) * 60 * 60 * 1000);
+    const generated = await api.generatePlan({
+      free_start: freeStart.toISOString(),
+      free_end: freeEnd.toISOString(),
+      density: state.profile.pace === 'relaxed' ? 'light' : state.profile.pace === 'full' ? 'full' : 'balanced',
+    });
+    state.plan = generated.plan;
+    state.step = 'result';
+  }
+
   app.addEventListener('click', async (event) => {
     const control = event.target.closest('[data-action]');
     if (!control || control.disabled) return;
@@ -507,6 +568,7 @@
     }
     if (action === 'go-profile') { state.step = 'profile'; render(); return; }
     if (action === 'go-welcome') { state.step = 'welcome'; render(); return; }
+    if (action === 'go-mode') { state.step = 'mode'; render(); return; }
     if (action === 'previous-question') { state.currentIndex -= 1; render(); return; }
     if (action === 'retry' && state.retryTask) { await runTask(state.retryTask); return; }
     if (action === 'save-profile') {
@@ -544,18 +606,14 @@
     }
     if (action === 'submit-questionnaire') {
       await runTask(async () => {
-      state.result = await api.submitQuestionnaire();
-        const freeStart = new Date();
-        freeStart.setSeconds(0, 0);
-        const freeEnd = new Date(freeStart.getTime() + (state.profile.timeMode === 'day' ? 8 : 4) * 60 * 60 * 1000);
-        const generated = await api.generatePlan({
-          free_start: freeStart.toISOString(),
-          free_end: freeEnd.toISOString(),
-          density: state.profile.pace === 'relaxed' ? 'light' : state.profile.pace === 'full' ? 'full' : 'balanced',
-        });
-        state.plan = generated.plan;
-        state.step = 'result';
+        state.result = await api.submitQuestionnaire();
+        state.profileInsight = await api.getProfileInsight();
+        state.step = 'insight';
       });
+      return;
+    }
+    if (action === 'generate-plan') {
+      await runTask(generateCurrentPlan);
       return;
     }
     if (action === 'start-execution' || action === 'complete-execution' || action === 'skip-execution' || action === 'check-deadline') {

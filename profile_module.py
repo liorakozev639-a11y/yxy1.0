@@ -53,6 +53,144 @@ class Profile:
     rule_version: str
 
 
+DIMENSION_LABELS = {
+    "energy": "活力充电",
+    "recovery": "松弛疗愈",
+    "calm": "松弛疗愈",
+    "social": "社交连接",
+    "exploration": "乐享探索",
+    "explore": "乐享探索",
+    "growth": "自我成长",
+    "活力充电": "活力充电",
+    "松弛疗愈": "松弛疗愈",
+    "社交连接": "社交连接",
+    "乐享探索": "乐享探索",
+    "自我成长": "自我成长",
+}
+
+DIMENSION_EXPLANATIONS = {
+    "活力充电": "你更容易被能让身体动起来、恢复精神的活动带动。",
+    "松弛疗愈": "你当前更需要降低压力、放慢节奏和恢复情绪余量。",
+    "社交连接": "你会从熟人陪伴、轻量互动或共同完成任务里获得动力。",
+    "乐享探索": "你适合给空闲时间加入一点新鲜体验，让这段时间更有记忆点。",
+    "自我成长": "你愿意用可控的小目标，让休息时间也保留一点成就感。",
+}
+
+CONSTRAINT_LABELS = {
+    "duration": {"half": "半天", "day": "全天"},
+    "budget": {"low": "20 元以内", "medium": "40 元以内", "high": "80 元以内"},
+    "outing": {
+        "home": "居家完成",
+        "nearby": "附近出门",
+        "city": "全城范围",
+        "any": "都可以",
+    },
+    "company": {"solo": "独处", "group": "结伴", "both": "都可以"},
+}
+
+
+def _score_level(score: float) -> str:
+    if score >= 0.75:
+        return "强偏好"
+    if score >= 0.5:
+        return "中等偏好"
+    if score >= 0.25:
+        return "轻度偏好"
+    return "低偏好"
+
+
+def _constraint_card(key: str, label: str, raw_value: Any, text: str) -> dict[str, Any]:
+    value = CONSTRAINT_LABELS.get(key, {}).get(raw_value, raw_value)
+    return {
+        "key": key,
+        "label": label,
+        "value": str(value) if value is not None else "未填写",
+        "text": text,
+    }
+
+
+def build_profile_insight(profile: Profile) -> dict[str, Any]:
+    top_dimensions = [
+        {
+            "dimension": dimension,
+            "label": DIMENSION_LABELS.get(dimension, dimension),
+            "score": score,
+            "level": _score_level(score),
+            "text": DIMENSION_EXPLANATIONS.get(
+                DIMENSION_LABELS.get(dimension, dimension),
+                "这个方向会作为任务推荐的重要参考。",
+            ),
+        }
+        for dimension, score in sorted(
+            profile.scores.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ]
+    primary = top_dimensions[0] if top_dimensions else {
+        "label": "自由安排",
+        "score": 0,
+    }
+    constraints = profile.constraints
+    selected_categories = list(constraints.get("categories") or [])
+    constraint_cards = [
+        _constraint_card(
+            "duration",
+            "可用时间",
+            constraints.get("duration"),
+            "用于控制计划总时长和任务数量。",
+        ),
+        _constraint_card(
+            "budget",
+            "预算区间",
+            constraints.get("budget"),
+            "用于筛掉明显超出预算的活动。",
+        ),
+        _constraint_card(
+            "outing",
+            "活动方式",
+            constraints.get("outing"),
+            "用于决定任务偏向居家、附近或全城范围。",
+        ),
+        _constraint_card(
+            "company",
+            "同行偏好",
+            constraints.get("company"),
+            "用于决定任务偏向独处、结伴或两者都可。",
+        ),
+    ]
+    if constraints.get("city_or_campus"):
+        constraint_cards.append(
+            _constraint_card(
+                "city_or_campus",
+                "所在城市或校园",
+                constraints.get("city_or_campus"),
+                "后续接入本地数据后，可用于推荐更具体的地点。",
+            )
+        )
+
+    suggestions = [
+        f"优先保留{primary['label']}相关任务，再用其他方向补齐计划。",
+        "单个任务建议控制在当前可用时间内，先保证能开始。",
+    ]
+    if constraints.get("rest_only"):
+        suggestions.insert(1, "当前状态偏恢复，计划会降低任务强度和连续任务密度。")
+
+    category_text = "、".join(selected_categories) if selected_categories else "未选择固定方向"
+    return {
+        "session_id": profile.session_id,
+        "profile_version": profile.profile_version,
+        "rule_version": profile.rule_version,
+        "confidence": profile.confidence,
+        "summary": (
+            f"你的主要倾向是{primary['label']}，本次计划会在"
+            f"{category_text}中优先匹配更容易执行的任务。"
+        ),
+        "top_dimensions": top_dimensions,
+        "constraint_cards": constraint_cards,
+        "suggestions": suggestions,
+    }
+
+
 class QuestionInput(BaseModel):
     id: str
     dimension: str

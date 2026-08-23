@@ -337,6 +337,10 @@ def create_app(
     def submit_questionnaire(session_id: str) -> dict[str, Any]:
         return success(questionnaire_service.submit(session_id))
 
+    @app.get("/api/v1/sessions/{session_id}/profile/insight")
+    def get_profile_insight(session_id: str) -> dict[str, Any]:
+        return success(orchestrator.build_profile_insight(session_id))
+
     @app.post("/api/v1/sessions/{session_id}/plan/generate")
     def generate_plan(
         session_id: str,

@@ -64,6 +64,7 @@ test('questionnaire methods use the unified API contract', async () => {
   await api.skipQuestion('q_rest');
   await api.getProgress();
   await api.submitQuestionnaire();
+  await api.getProfileInsight();
   await api.generatePlan({
     free_start: '2026-08-09T10:00:00Z',
     free_end: '2026-08-09T14:00:00Z',
@@ -72,7 +73,7 @@ test('questionnaire methods use the unified API contract', async () => {
   await api.getPlan();
 
   assert.deepEqual(calls.map((call) => call.options.method), [
-    'PUT', 'POST', 'PATCH', 'POST', 'GET', 'POST', 'POST', 'GET',
+    'PUT', 'POST', 'PATCH', 'POST', 'GET', 'POST', 'GET', 'POST', 'GET',
   ]);
   assert.ok(calls.every((call) => call.url.startsWith('http://localhost:9000/api/v1/sessions/sess_test/')));
   assert.ok(calls.every((call) => !('Authorization' in call.options.headers)));

@@ -87,6 +87,18 @@ class FakeDeliveryService:
 
 
 class FakeOrchestrator:
+    def build_profile_insight(self, session_id):
+        return {
+            "session_id": session_id,
+            "profile_version": 1,
+            "summary": "你当前更偏向活力充电。",
+            "top_dimensions": [
+                {"dimension": "energy", "label": "活力充电", "score": 0.8},
+            ],
+            "constraint_cards": [],
+            "suggestions": [],
+        }
+
     def generate_plan(self, session_id, request):
         return {
             "profile": {"session_id": session_id},
@@ -222,6 +234,36 @@ class MVPIntegrationTests(unittest.TestCase):
         restored = client.get("/api/v1/sessions/sess_api/plan")
         self.assertEqual(restored.status_code, 200)
         self.assertEqual(restored.json()["data"]["plan_id"], "plan_api")
+        client.close()
+
+    def test_api_exposes_profile_insight_route(self):
+        from fastapi.testclient import TestClient
+        from main import create_app
+
+        client = TestClient(
+            create_app(
+                FakeSessionService({}),
+                FakeQuestionnaireService(
+                    FakeQuestionnaireRepository(
+                        QuestionnaireSession(
+                            session_id="sess_api",
+                            mode="quick",
+                            question_ids=[],
+                            submitted=True,
+                        ),
+                        [],
+                    ),
+                    [],
+                ),
+                FakeOrchestrator(),
+            )
+        )
+
+        response = client.get("/api/v1/sessions/sess_api/profile/insight")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["profile_version"], 1)
+        self.assertIn("活力充电", response.json()["data"]["summary"])
         client.close()
 
 

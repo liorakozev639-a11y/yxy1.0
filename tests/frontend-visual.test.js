@@ -35,3 +35,14 @@ test('formal result markup keeps real plan actions inside pixel timeline', () =>
   assert.match(app, /data-action="add-custom-task"/);
   assert.match(app, /data-action="confirm-plan"/);
 });
+
+test('formal frontend shows profile insight before generating the plan', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /renderInsight/);
+  assert.match(app, /你的空闲偏好画像/);
+  assert.match(app, /data-action="generate-plan"/);
+  assert.match(css, /\.profile-insight-grid/);
+  assert.match(css, /\.profile-insight-card/);
+});

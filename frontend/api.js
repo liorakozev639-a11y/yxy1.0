@@ -126,6 +126,11 @@
       });
     }
 
+    function getProfileInsight(sessionId) {
+      const current = requireSessionId(sessionId);
+      return request(`/api/v1/sessions/${current}/profile/insight`);
+    }
+
     function generatePlan(input, sessionId) {
       const current = requireSessionId(sessionId);
       return request(`/api/v1/sessions/${current}/plan/generate`, {
@@ -239,6 +244,7 @@
       getFeedback,
       getProgress,
       getPlan,
+      getProfileInsight,
       getSessionId,
       generatePlan,
       restoreSession,
