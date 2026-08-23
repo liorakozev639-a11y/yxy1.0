@@ -12,7 +12,13 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from mvp_orchestrator import GeneratePlanRequest
-from recommendation_module import build_reason_tags, build_reason_text
+from recommendation_module import (
+    build_matched_preferences,
+    build_reason_tags,
+    build_reason_text,
+    build_warning_text,
+    calculate_match_score,
+)
 from task_repository import CATEGORIES, Task, TaskRepository
 
 
@@ -97,12 +103,17 @@ def build_replaced_item(current: dict[str, Any], replacement: Task) -> dict[str,
     for task_id in (current.get("task_id"), replacement.id):
         if task_id and task_id not in replacement_history:
             replacement_history.append(task_id)
+    old_title = current.get("title") or "原任务"
     updated.update(
         task_id=replacement.id,
         title=replacement.title,
         category=replacement.category,
         status="pending",
         replacement_history=replacement_history,
+        replacement_reason=(
+            f"已避开{old_title}，换成同属{replacement.category}的任务；"
+            "系统会继续排除当前任务和历史出现过的任务。"
+        ),
     )
     return updated
 
@@ -125,6 +136,9 @@ def enrich_plan_item_payload(item: dict[str, Any], task: Task | None = None) -> 
     if item["kind"] != "task":
         payload["reason_tags"] = ["自由调整", "低压力友好"]
         payload["reason_text"] = "这段时间用于休息与自由调整，避免计划过满。"
+        payload["matched_preferences"] = ["低压力友好"]
+        payload["warning_text"] = ""
+        payload["match_score"] = 1.0
         return payload
 
     start_at = item["start_at"]
@@ -133,10 +147,29 @@ def enrich_plan_item_payload(item: dict[str, Any], task: Task | None = None) -> 
     if task is None:
         payload["reason_tags"] = [f"覆盖{item['category']}", "时间已安排"]
         payload["reason_text"] = f"该任务覆盖「{item['category']}」，并已保留当前时间段。"
+        payload["matched_preferences"] = ["时间已安排"]
+        payload["warning_text"] = ""
+        payload["match_score"] = 0.5
+        if payload["replacement_history"]:
+            payload["replacement_reason"] = (
+                f"已避开 {len(payload['replacement_history']) - 1} 个历史任务，"
+                "本次替换仍保持当前分类和时间段。"
+            )
         return payload
 
     payload["reason_tags"] = build_reason_tags(task, slot_minutes=slot_minutes)
     payload["reason_text"] = build_reason_text(task, slot_minutes=slot_minutes)
+    payload["matched_preferences"] = build_matched_preferences(
+        task,
+        slot_minutes=slot_minutes,
+    )
+    payload["warning_text"] = build_warning_text(task, slot_minutes=slot_minutes)
+    payload["match_score"] = calculate_match_score(task, slot_minutes=slot_minutes)
+    if payload["replacement_history"]:
+        payload["replacement_reason"] = (
+            f"已避开 {len(payload['replacement_history']) - 1} 个历史任务，"
+            f"替换为同属{task.category}且当前未出现过的任务。"
+        )
     return payload
 
 

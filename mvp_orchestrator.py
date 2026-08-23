@@ -500,6 +500,9 @@ class MVPOrchestrator:
             task["id"]: {
                 "reason_tags": task.get("reason_tags", []),
                 "reason_text": task.get("reason_text", ""),
+                "match_score": task.get("match_score"),
+                "matched_preferences": task.get("matched_preferences", []),
+                "warning_text": task.get("warning_text", ""),
             }
             for task in recommendation.get("tasks", [])
         }
@@ -510,6 +513,12 @@ class MVPOrchestrator:
             elif item.get("kind") == "rest":
                 item["reason_tags"] = ["自由调整", "低压力友好"]
                 item["reason_text"] = "这段时间用于休息与自由调整，避免计划过满。"
+                item["match_score"] = 1.0
+                item["matched_preferences"] = ["低压力友好"]
+                item["warning_text"] = ""
             else:
                 item["reason_tags"] = [f"覆盖{item.get('category', '当前分类')}"]
                 item["reason_text"] = "该任务已被安排到当前计划时间段中。"
+                item["match_score"] = 0.5
+                item["matched_preferences"] = ["时间已安排"]
+                item["warning_text"] = ""

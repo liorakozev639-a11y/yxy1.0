@@ -58,6 +58,9 @@ class PlanReplacementRuleTests(unittest.TestCase):
         self.assertEqual(updated["start_at"], current["start_at"])
         self.assertEqual(updated["end_at"], current["end_at"])
         self.assertEqual(updated["status"], "pending")
+        self.assertIn("replacement_reason", updated)
+        self.assertIn("已避开旧任务", updated["replacement_reason"])
+        self.assertIn("同属乐享探索", updated["replacement_reason"])
 
     def test_build_replaced_item_tracks_replacement_history(self) -> None:
         current = {

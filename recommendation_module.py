@@ -82,6 +82,9 @@ def recommend_tasks(
             "task_id": task["id"],
             "tags": task["reason_tags"],
             "text": task["reason_text"],
+            "match_score": task["match_score"],
+            "matched_preferences": task["matched_preferences"],
+            "warning_text": task["warning_text"],
         }
         for task in enriched_tasks
     ]
@@ -103,6 +106,19 @@ def enrich_task_reason(
 ) -> dict[str, Any]:
     payload = asdict(task)
     payload["reason_tags"] = build_reason_tags(task, constraints, slot_minutes)
+    payload["matched_preferences"] = build_matched_preferences(
+        task,
+        constraints,
+        preference_score,
+        slot_minutes,
+    )
+    payload["warning_text"] = build_warning_text(task, constraints, slot_minutes)
+    payload["match_score"] = calculate_match_score(
+        task,
+        constraints,
+        preference_score,
+        slot_minutes,
+    )
     payload["reason_text"] = build_reason_text(
         task,
         constraints,
@@ -110,6 +126,92 @@ def enrich_task_reason(
         slot_minutes,
     )
     return payload
+
+
+def calculate_match_score(
+    task: Task,
+    constraints: dict[str, Any] | None = None,
+    preference_score: float = 0,
+    slot_minutes: int | None = None,
+) -> float:
+    constraints = constraints or {}
+    active_minutes = slot_minutes or task.duration
+    score = float(preference_score)
+    if task.budget > constraints.get("budget_limit", task.budget):
+        score -= 0.1
+    if active_minutes > constraints.get("max_duration", active_minutes):
+        score -= 0.1
+    outing = constraints.get("outing")
+    if outing and outing != "any" and task.outing not in {"home", outing}:
+        score -= 0.1
+    company = constraints.get("company")
+    if company and company != "both" and task.company not in {company, "both"}:
+        score -= 0.1
+    return round(max(0.0, min(1.0, score)), 2)
+
+
+def build_matched_preferences(
+    task: Task,
+    constraints: dict[str, Any] | None = None,
+    preference_score: float = 0,
+    slot_minutes: int | None = None,
+) -> list[str]:
+    constraints = constraints or {}
+    active_minutes = slot_minutes or task.duration
+    matches: list[str] = []
+    if preference_score >= 0.75:
+        matches.append("分类偏好强")
+    elif preference_score >= 0.5:
+        matches.append("分类偏好中等")
+    elif preference_score > 0:
+        matches.append("分类偏好轻度")
+
+    outing = constraints.get("outing")
+    if outing == "home" and task.outing == "home":
+        matches.append("居家可做")
+    elif outing == "nearby" and task.outing in {"home", "nearby"}:
+        matches.append("出行范围匹配")
+    elif outing in {"city", "any"}:
+        matches.append("出行弹性匹配")
+
+    company = constraints.get("company")
+    if company == "solo" and task.company in {"solo", "both"}:
+        matches.append("独处友好")
+    elif company == "group" and task.company in {"group", "both"}:
+        matches.append("结伴友好")
+    elif company == "both":
+        matches.append("同行方式灵活")
+
+    if task.budget <= constraints.get("budget_limit", task.budget):
+        matches.append("预算匹配")
+    if active_minutes <= constraints.get("max_duration", active_minutes):
+        matches.append("时长匹配")
+    if constraints.get("rest_only"):
+        matches.append("低压力优先")
+    return matches
+
+
+def build_warning_text(
+    task: Task,
+    constraints: dict[str, Any] | None = None,
+    slot_minutes: int | None = None,
+) -> str:
+    constraints = constraints or {}
+    active_minutes = slot_minutes or task.duration
+    warnings: list[str] = []
+    if task.budget > constraints.get("budget_limit", task.budget):
+        warnings.append("预算高于当前档位")
+    if active_minutes > constraints.get("max_duration", active_minutes):
+        warnings.append("时长超过当前偏好")
+    outing = constraints.get("outing")
+    if outing and outing != "any" and task.outing not in {"home", outing}:
+        warnings.append("出行范围可能偏远")
+    company = constraints.get("company")
+    if company and company != "both" and task.company not in {company, "both"}:
+        warnings.append("同行方式可能不完全匹配")
+    if not warnings:
+        return ""
+    return "；".join(warnings) + "，请确认是否接受。"
 
 
 def build_reason_tags(

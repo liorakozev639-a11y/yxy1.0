@@ -197,6 +197,10 @@ class MVPIntegrationTests(unittest.TestCase):
         self.assertTrue(result["plan"]["items"])
         self.assertTrue(any(item["kind"] == "rest" for item in result["plan"]["items"]))
         self.assertEqual(set(result["recommendation"]["covered_categories"]), set(CATEGORIES))
+        task_item = next(item for item in result["plan"]["items"] if item["kind"] == "task")
+        self.assertIn("match_score", task_item)
+        self.assertIn("matched_preferences", task_item)
+        self.assertIn("warning_text", task_item)
 
     def test_api_exposes_generate_and_get_plan_routes(self):
         from fastapi.testclient import TestClient

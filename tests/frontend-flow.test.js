@@ -64,12 +64,20 @@ test('taskReasonSummary normalizes card tags and detail text', () => {
     category: '活力充电',
     reason_tags: ['居家可做', '低预算', '短时间可完成', '适合独处'],
     reason_text: '你选择了「活力充电」，这个任务可以覆盖该方向。',
+    match_score: 0.86,
+    matched_preferences: ['分类偏好强', '居家可做'],
+    warning_text: '预算略高，请确认是否接受。',
+    replacement_reason: '已避开你之前看过的任务。',
   };
 
   const summary = taskReasonSummary(item);
 
   assert.deepEqual(summary.tags, ['居家可做', '低预算', '短时间可完成', '适合独处']);
   assert.equal(summary.text, '你选择了「活力充电」，这个任务可以覆盖该方向。');
+  assert.equal(summary.matchScore, 0.86);
+  assert.deepEqual(summary.matchedPreferences, ['分类偏好强', '居家可做']);
+  assert.equal(summary.warningText, '预算略高，请确认是否接受。');
+  assert.equal(summary.replacementReason, '已避开你之前看过的任务。');
 });
 
 test('taskReasonSummary falls back when backend reason fields are missing', () => {

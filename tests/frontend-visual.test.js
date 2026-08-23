@@ -46,3 +46,15 @@ test('formal frontend shows profile insight before generating the plan', () => {
   assert.match(css, /\.profile-insight-grid/);
   assert.match(css, /\.profile-insight-card/);
 });
+
+test('task detail dialog exposes score, preference matches, warnings, and replacement note', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /reason-score-row/);
+  assert.match(app, /matchedPreferences/);
+  assert.match(app, /warningText/);
+  assert.match(app, /replacementReason/);
+  assert.match(css, /\.matched-preferences/);
+  assert.match(css, /\.replacement-note/);
+});

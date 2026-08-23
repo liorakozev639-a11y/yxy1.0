@@ -48,6 +48,14 @@
       text: item && item.reason_text
         ? item.reason_text
         : `该任务覆盖「${category}」，并已进入当前计划。`,
+      matchScore: Number.isFinite(Number(item && item.match_score))
+        ? Number(item.match_score)
+        : null,
+      matchedPreferences: Array.isArray(item && item.matched_preferences)
+        ? item.matched_preferences
+        : [],
+      warningText: item && item.warning_text ? item.warning_text : '',
+      replacementReason: item && item.replacement_reason ? item.replacement_reason : '',
     };
   }
 

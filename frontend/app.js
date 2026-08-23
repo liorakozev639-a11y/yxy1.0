@@ -266,6 +266,13 @@
           <button class="icon-button" data-action="close-detail" aria-label="关闭详情"><i data-lucide="x"></i></button>
         </div>
         ${reasonTags(item)}
+        <div class="reason-score-row">
+          <span>匹配分</span>
+          <strong>${summary.matchScore === null ? '--' : Math.round(summary.matchScore * 100)}</strong>
+        </div>
+        ${summary.matchedPreferences.length ? `<div class="matched-preferences">${summary.matchedPreferences.map((entry) => `<span>${escapeHtml(entry)}</span>`).join('')}</div>` : ''}
+        ${summary.warningText ? `<div class="warning-note">${escapeHtml(summary.warningText)}</div>` : ''}
+        ${summary.replacementReason ? `<div class="replacement-note">${escapeHtml(summary.replacementReason)}</div>` : ''}
         <div class="reason-text">${escapeHtml(summary.text).replace(/\n/g, '<br>')}</div>
       </article>
     </div>`;
