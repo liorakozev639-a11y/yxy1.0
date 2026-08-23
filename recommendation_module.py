@@ -69,25 +69,117 @@ def recommend_tasks(
                 break
 
     missing = sorted(selected_category_set - covered)
+    enriched_tasks = [
+        enrich_task_reason(
+            task,
+            profile.get("constraints", {}),
+            preference_map.get(task.category, 0),
+        )
+        for task in selected
+    ]
     reasons = [
         {
-            "task_id": task.id,
-            "text": (
-                f"任务属于{task.category}，当前分类偏好分数为"
-                f"{preference_map.get(task.category, 0):.2f}，"
-                f"预计需要{task.duration}分钟，预算约为{task.budget}元。"
-            ),
+            "task_id": task["id"],
+            "tags": task["reason_tags"],
+            "text": task["reason_text"],
         }
-        for task in selected
+        for task in enriched_tasks
     ]
 
     return {
-        "tasks": [asdict(task) for task in selected],
+        "tasks": enriched_tasks,
         "task_ids": [task.id for task in selected],
         "covered_categories": sorted(covered),
         "missing_categories": missing,
         "reasons": reasons,
     }
+
+
+def enrich_task_reason(
+    task: Task,
+    constraints: dict[str, Any] | None = None,
+    preference_score: float = 0,
+    slot_minutes: int | None = None,
+) -> dict[str, Any]:
+    payload = asdict(task)
+    payload["reason_tags"] = build_reason_tags(task, constraints, slot_minutes)
+    payload["reason_text"] = build_reason_text(
+        task,
+        constraints,
+        preference_score,
+        slot_minutes,
+    )
+    return payload
+
+
+def build_reason_tags(
+    task: Task,
+    constraints: dict[str, Any] | None = None,
+    slot_minutes: int | None = None,
+) -> list[str]:
+    constraints = constraints or {}
+    active_minutes = slot_minutes or task.duration
+    tags: list[str] = []
+
+    if task.outing == "home":
+        tags.append("居家可做")
+    elif task.outing == "nearby":
+        tags.append("附近可做")
+    elif task.outing == "city":
+        tags.append("适合全城探索")
+
+    if task.budget <= 20:
+        tags.append("低预算")
+    elif task.budget <= constraints.get("budget_limit", task.budget):
+        tags.append("预算匹配")
+
+    if active_minutes <= 30:
+        tags.append("短时间可完成")
+    elif active_minutes <= 60:
+        tags.append("一小时内完成")
+
+    if task.company == "solo":
+        tags.append("适合独处")
+    elif task.company == "group":
+        tags.append("适合结伴")
+    elif task.company == "both":
+        tags.append("独处结伴皆可")
+
+    if constraints.get("rest_only"):
+        tags.append("低压力友好")
+    tags.append(f"覆盖{task.category}")
+    return tags
+
+
+def build_reason_text(
+    task: Task,
+    constraints: dict[str, Any] | None = None,
+    preference_score: float = 0,
+    slot_minutes: int | None = None,
+) -> str:
+    constraints = constraints or {}
+    active_minutes = slot_minutes or task.duration
+    lines = [
+        f"你选择了「{task.category}」，这个任务可以覆盖该方向的空闲需求。",
+        f"当前分类偏好分数为 {float(preference_score):.2f}，系统会优先保留匹配度更高的分类。",
+    ]
+    if task.outing == "home":
+        lines.append("你的当前安排可以无需外出完成，适合居家或低出行成本场景。")
+    elif task.outing == "nearby":
+        lines.append("这个任务适合在附近完成，不需要长距离移动。")
+    else:
+        lines.append("这个任务适合留给出行范围更宽松的时间段。")
+
+    if task.company == "solo":
+        lines.append("它适合独处完成，不依赖他人临时配合。")
+    elif task.company == "group":
+        lines.append("它更适合结伴完成，可以满足社交连接需求。")
+    else:
+        lines.append("它既可以独处完成，也可以和别人一起完成。")
+
+    lines.append(f"当前时间段约 {active_minutes} 分钟，系统会按这个时间段展示可执行版本。")
+    lines.append(f"预计预算约为 {task.budget} 元，便于控制休闲成本。")
+    return "\n".join(lines)
 
 
 def build_recommendation(

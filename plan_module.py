@@ -12,11 +12,116 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from mvp_orchestrator import GeneratePlanRequest
-from task_repository import CATEGORIES, TaskRepository
+from recommendation_module import build_reason_tags, build_reason_text
+from task_repository import CATEGORIES, Task, TaskRepository
 
 
 def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def _task_matches_outing(task: Task, user_outing: str) -> bool:
+    allowed = {
+        "home": {"home"},
+        "nearby": {"home", "nearby"},
+        "city": {"home", "nearby", "city"},
+        "any": {"home", "nearby", "city"},
+    }
+    return task.outing in allowed.get(user_outing, {"home", "nearby", "city"})
+
+
+def _task_matches_company(task: Task, user_company: str) -> bool:
+    return user_company == "both" or task.company in {user_company, "both"}
+
+
+def select_replacement_task(
+    *,
+    candidates: list[Task],
+    category: str,
+    used_task_ids: set[str],
+    budget_limit: int,
+    max_duration: int,
+    outing: str,
+    company: str,
+    preferred_task_id: str | None = None,
+) -> Task | None:
+    available = [
+        task
+        for task in candidates
+        if task.status == "approved"
+        and task.category == category
+        and task.id not in used_task_ids
+    ]
+    if preferred_task_id:
+        preferred = next(
+            (task for task in available if task.id == preferred_task_id),
+            None,
+        )
+        if preferred is not None:
+            return preferred
+
+    tiers = (
+        lambda task: (
+            task.budget <= budget_limit
+            and task.duration <= max_duration
+            and _task_matches_outing(task, outing)
+            and _task_matches_company(task, company)
+        ),
+        lambda task: (
+            task.duration <= max_duration
+            and _task_matches_outing(task, outing)
+            and _task_matches_company(task, company)
+        ),
+        lambda task: task.duration <= max_duration and _task_matches_company(task, company),
+        lambda task: task.duration <= max_duration,
+        lambda task: True,
+    )
+    for predicate in tiers:
+        matches = [task for task in available if predicate(task)]
+        if matches:
+            return sorted(matches, key=lambda task: (task.duration, task.budget, task.id))[0]
+    return None
+
+
+def build_replaced_item(current: dict[str, Any], replacement: Task) -> dict[str, Any]:
+    updated = dict(current)
+    updated.update(
+        task_id=replacement.id,
+        title=replacement.title,
+        category=replacement.category,
+        status="pending",
+    )
+    return updated
+
+
+def enrich_plan_item_payload(item: dict[str, Any], task: Task | None = None) -> dict[str, Any]:
+    payload = {
+        "id": item["id"],
+        "task_id": item["task_id"],
+        "title": item["title"],
+        "category": item["category"],
+        "start_at": item["start_at"].isoformat(),
+        "end_at": item["end_at"].isoformat(),
+        "kind": item["kind"],
+        "status": item["status"],
+        "locked": bool(item["locked"]),
+    }
+    if item["kind"] != "task":
+        payload["reason_tags"] = ["自由调整", "低压力友好"]
+        payload["reason_text"] = "这段时间用于休息与自由调整，避免计划过满。"
+        return payload
+
+    start_at = item["start_at"]
+    end_at = item["end_at"]
+    slot_minutes = max(1, int((end_at - start_at).total_seconds() // 60))
+    if task is None:
+        payload["reason_tags"] = [f"覆盖{item['category']}", "时间已安排"]
+        payload["reason_text"] = f"该任务覆盖「{item['category']}」，并已保留当前时间段。"
+        return payload
+
+    payload["reason_tags"] = build_reason_tags(task, slot_minutes=slot_minutes)
+    payload["reason_text"] = build_reason_text(task, slot_minutes=slot_minutes)
+    return payload
 
 
 class PlanManagementService:
@@ -94,6 +199,10 @@ class PlanManagementService:
 
     @staticmethod
     def _payload(plan: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+        task_lookup = {
+            task.id: task
+            for task in TaskRepository().public_tasks
+        }
         return {
             "plan_id": plan["id"],
             "session_id": plan["session_id"],
@@ -105,17 +214,7 @@ class PlanManagementService:
             "status": plan["status"],
             "unscheduled_task_ids": list(plan["unscheduled_task_ids"] or []),
             "items": [
-                {
-                    "id": item["id"],
-                    "task_id": item["task_id"],
-                    "title": item["title"],
-                    "category": item["category"],
-                    "start_at": item["start_at"].isoformat(),
-                    "end_at": item["end_at"].isoformat(),
-                    "kind": item["kind"],
-                    "status": item["status"],
-                    "locked": bool(item["locked"]),
-                }
+                enrich_plan_item_payload(item, task_lookup.get(item["task_id"]))
                 for item in items
             ],
         }
@@ -257,39 +356,36 @@ class PlanManagementService:
         plan = self._require(session_id, plan_id)
         self._check_version(plan, expected_version)
         current = self._find_item(plan, item_id)
+        if current["kind"] != "task":
+            raise HTTPException(status_code=400, detail="只能替换任务项")
         session = self.sessions.require_active(session_id)
         budget_limit = {"low": 20, "medium": 40, "high": 80}.get(session.preferences.get("budget"), 40)
         max_duration = {"half": 270, "day": 480}.get(session.preferences.get("duration"), 270)
-        candidates = self.tasks.search_tasks(
-            session_id=session_id,
+        used_ids = {
+            item["task_id"]
+            for item in plan["items"]
+            if item["task_id"]
+        }
+        candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+        candidate = select_replacement_task(
+            candidates=candidates,
+            category=current["category"],
+            used_task_ids=used_ids,
             budget_limit=budget_limit,
             max_duration=max_duration,
             outing=session.preferences.get("outing", "any"),
             company=session.preferences.get("company", "both"),
-            categories=[current["category"]],
+            preferred_task_id=replacement_task_id,
         )
-        used_ids = {item["task_id"] for item in plan["items"]}
-        candidate = next(
-            (task for task in candidates if task.id == replacement_task_id),
-            None,
-        ) if replacement_task_id else None
-        if candidate is None:
-            candidate = next((task for task in candidates if task.id not in used_ids), None)
         if candidate is None:
             raise HTTPException(status_code=409, detail="当前约束下没有可替换任务")
         start = self._parse_time(current["start_at"])
-        end = start + timedelta(minutes=candidate.duration)
+        end = self._parse_time(current["end_at"])
         self._ensure_slot(plan, start, end, item_id)
         items = [dict(item) for item in plan["items"]]
         for item in items:
             if item["id"] == item_id:
-                item.update(
-                    task_id=candidate.id,
-                    title=candidate.title,
-                    category=candidate.category,
-                    end_at=end.isoformat(),
-                    status="pending",
-                )
+                item.update(build_replaced_item(item, candidate))
         return self._save_version(plan, items)
 
     def add_custom_task(self, session_id: str, plan_id: str, expected_version: int, title: str, duration_minutes: int, category: str | None = None) -> dict[str, Any]:

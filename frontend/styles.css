@@ -165,6 +165,13 @@ h3 { margin-bottom: 4px; font-size: 17px; }
 .timeline-item span { margin-top: 5px; color: var(--muted); font-size: 13px; }
 .timeline-item.is-skipped { opacity: .56; }
 .timeline-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.reason-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.reason-tags span { display: inline-flex; align-items: center; min-height: 26px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 4px; background: #f4f7f3; color: var(--teal-dark); font-size: 12px; }
+.detail-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 20px; background: rgba(23, 33, 30, .34); }
+.detail-dialog { width: min(560px, 100%); padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: var(--shadow); }
+.detail-header { display: flex; justify-content: space-between; gap: 16px; }
+.detail-header h2 { margin-bottom: 12px; font-size: 26px; }
+.reason-text { margin-top: 16px; color: var(--muted); line-height: 1.75; }
 .session-box { margin-top: 18px; padding: 16px 18px; border: 1px solid var(--line); background: var(--paper); }
 .session-box span { display: block; margin-bottom: 8px; color: var(--muted); font-size: 13px; }
 .session-box code { overflow-wrap: anywhere; color: var(--teal-dark); }
@@ -403,6 +410,32 @@ body.pixel-body {
 .pixel-time-index { display: inline-block; margin-right: 8px; color: var(--pixel-coral); font-weight: 700; }
 .pixel-task-content strong { font-size: 17px; }
 .pixel-task-content span { color: var(--pixel-green-dark); }
+.pixel-task-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pixel-task-header .button { flex: 0 0 auto; }
+.pixel-task-content .reason-tags span {
+  border: 2px solid var(--pixel-line);
+  border-radius: 0;
+  background: #eef6ef;
+  box-shadow: 2px 2px 0 var(--pixel-lavender);
+  color: var(--pixel-green-dark);
+  font-family: "Courier New", "Noto Sans SC", "Microsoft YaHei", monospace;
+}
+.detail-dialog {
+  border: 2px solid var(--pixel-line);
+  border-radius: 0;
+  background: var(--pixel-paper);
+  box-shadow: 7px 7px 0 var(--pixel-coral);
+}
+.detail-dialog .reason-tags span {
+  border: 2px solid var(--pixel-line);
+  border-radius: 0;
+  background: var(--pixel-yellow);
+  color: var(--pixel-ink);
+}
+.reason-text {
+  padding-top: 14px;
+  border-top: 2px dashed var(--pixel-line);
+}
 .pixel-timeline-item.is-skipped { background: #ece9e0; box-shadow: 4px 4px 0 #aaa59a; }
 .pixel-result-actions { padding-top: 4px; }
 
@@ -453,5 +486,6 @@ body.pixel-body {
   .pixel-hero-stamp { display: none; }
   .pixel-section-label { align-items: flex-start; flex-direction: column; gap: 5px; }
   .pixel-timeline-item { grid-template-columns: 76px 1fr; }
+  .pixel-task-header { flex-direction: column; }
   .pixel-result-actions .actions-right { flex-wrap: wrap; }
 }

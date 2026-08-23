@@ -404,10 +404,12 @@ class MVPOrchestrator:
         self.plans.save(plan)
         web_plan = self._to_delivery_plan(plan)
         delivery = self.delivery.deliver(session_id, web_plan)
+        plan_payload = plan.to_dict()
+        self._attach_reason_metadata(plan_payload, recommendation)
         return {
             "profile": profile_data,
             "recommendation": recommendation,
-            "plan": plan.to_dict(),
+            "plan": plan_payload,
             "delivery": delivery.to_dict() if hasattr(delivery, "to_dict") else delivery,
         }
 
@@ -474,3 +476,26 @@ class MVPOrchestrator:
                 for item in plan.items
             ),
         )
+
+    @staticmethod
+    def _attach_reason_metadata(
+        plan_payload: dict[str, Any],
+        recommendation: dict[str, Any],
+    ) -> None:
+        reasons_by_task_id = {
+            task["id"]: {
+                "reason_tags": task.get("reason_tags", []),
+                "reason_text": task.get("reason_text", ""),
+            }
+            for task in recommendation.get("tasks", [])
+        }
+        for item in plan_payload.get("items", []):
+            metadata = reasons_by_task_id.get(item.get("task_id"))
+            if metadata:
+                item.update(metadata)
+            elif item.get("kind") == "rest":
+                item["reason_tags"] = ["自由调整", "低压力友好"]
+                item["reason_text"] = "这段时间用于休息与自由调整，避免计划过满。"
+            else:
+                item["reason_tags"] = [f"覆盖{item.get('category', '当前分类')}"]
+                item["reason_text"] = "该任务已被安排到当前计划时间段中。"

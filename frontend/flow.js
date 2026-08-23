@@ -39,5 +39,22 @@
     }
   }
 
-  return { firstUnansweredIndex, recoverInitialization, resumeDestination };
+  function taskReasonSummary(item) {
+    const category = item && item.category ? item.category : '当前分类';
+    return {
+      tags: Array.isArray(item && item.reason_tags) && item.reason_tags.length > 0
+        ? item.reason_tags
+        : [`覆盖${category}`],
+      text: item && item.reason_text
+        ? item.reason_text
+        : `该任务覆盖「${category}」，并已进入当前计划。`,
+    };
+  }
+
+  return {
+    firstUnansweredIndex,
+    recoverInitialization,
+    resumeDestination,
+    taskReasonSummary,
+  };
 }));

@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   firstUnansweredIndex,
   recoverInitialization,
+  taskReasonSummary,
   resumeDestination,
 } = require('../frontend/flow.js');
 
@@ -55,4 +56,25 @@ test('recoverInitialization returns the replacement session on success', async (
 
   assert.equal(result.recovered, true);
   assert.equal(result.session.session_id, 'sess_new');
+});
+
+test('taskReasonSummary normalizes card tags and detail text', () => {
+  const item = {
+    title: '居家拉伸',
+    category: '活力充电',
+    reason_tags: ['居家可做', '低预算', '短时间可完成', '适合独处'],
+    reason_text: '你选择了「活力充电」，这个任务可以覆盖该方向。',
+  };
+
+  const summary = taskReasonSummary(item);
+
+  assert.deepEqual(summary.tags, ['居家可做', '低预算', '短时间可完成', '适合独处']);
+  assert.equal(summary.text, '你选择了「活力充电」，这个任务可以覆盖该方向。');
+});
+
+test('taskReasonSummary falls back when backend reason fields are missing', () => {
+  const summary = taskReasonSummary({ category: '松弛疗愈' });
+
+  assert.deepEqual(summary.tags, ['覆盖松弛疗愈']);
+  assert.equal(summary.text, '该任务覆盖「松弛疗愈」，并已进入当前计划。');
 });

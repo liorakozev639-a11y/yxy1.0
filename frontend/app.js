@@ -38,6 +38,7 @@
     busy: false,
     error: '',
     retryTask: null,
+    detailItemId: null,
     feedbackItemId: null,
     feedbackRating: null,
     feedbackReasons: [],
@@ -208,6 +209,27 @@
     </div>`;
   }
 
+  function reasonTags(item) {
+    const summary = flow.taskReasonSummary(item);
+    return `<div class="reason-tags">${summary.tags.slice(0, 5).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>`;
+  }
+
+  function reasonModal(items) {
+    const item = items.find((entry) => entry.id === state.detailItemId);
+    if (!item) return '';
+    const summary = flow.taskReasonSummary(item);
+    return `<div class="detail-backdrop" data-action="close-detail">
+      <article class="detail-dialog" role="dialog" aria-modal="true" aria-label="任务推荐理由" onclick="event.stopPropagation()">
+        <div class="detail-header">
+          <div><span class="eyebrow">推荐理由</span><h2>${escapeHtml(item.title)}</h2></div>
+          <button class="icon-button" data-action="close-detail" aria-label="关闭详情"><i data-lucide="x"></i></button>
+        </div>
+        ${reasonTags(item)}
+        <div class="reason-text">${escapeHtml(summary.text).replace(/\n/g, '<br>')}</div>
+      </article>
+    </div>`;
+  }
+
   function executionActions(item, plan) {
     const disabled = state.busy ? 'disabled' : '';
     if (item.status === 'pending') {
@@ -220,7 +242,7 @@
       return `<button class="button secondary compact" data-action="open-feedback" data-item-id="${escapeHtml(item.id)}" ${disabled}>${state.feedbackItemId === item.id ? '收起反馈' : '任务反馈'}</button>`;
     }
     if (item.status === 'needs_adjustment' || item.status === 'missed' || item.status === 'overdue') {
-      return `<button class="button secondary compact" data-action="replan" ${disabled}>重新排程</button><button class="button ghost compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${disabled}>替换</button>`;
+      return `<button class="button secondary compact" data-action="replan" ${disabled}>重新排程</button>`;
     }
     return `<span class="execution-status">${executionStatusLabel(item.status)}</span>`;
   }
@@ -253,8 +275,9 @@
           </div>
           <div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
             <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
-            <div class="pixel-task-content"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span><div class="timeline-actions">
+            <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}<div class="timeline-actions">
               ${executionActions(item, plan)}
+              <button class="button ghost compact" data-action="open-detail" data-item-id="${escapeHtml(item.id)}">详情</button>
               <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>修改时间</button>
               ${item.status === 'pending' || item.status === 'active' ? `<button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>编辑跳过</button>` : ''}
             </div>${feedbackPanel(item)}</div>
@@ -271,6 +294,7 @@
           <div class="pixel-status-note"><span class="pixel-dot"></span>${plan.status === 'confirmed' ? '计划已确认' : '计划草稿，可继续调整'}</div>
         </aside>
       </div>
+      ${reasonModal(items)}
     </section>`;
   }
 
@@ -299,6 +323,7 @@
     state.result = null;
     state.plan = null;
     state.feedbackItemId = null;
+    state.detailItemId = null;
     state.feedbackRating = null;
     state.feedbackReasons = [];
   }
@@ -552,6 +577,16 @@
       state.feedbackItemId = state.feedbackItemId === control.dataset.itemId ? null : control.dataset.itemId;
       state.feedbackRating = null;
       state.feedbackReasons = [];
+      render();
+      return;
+    }
+    if (action === 'open-detail') {
+      state.detailItemId = control.dataset.itemId;
+      render();
+      return;
+    }
+    if (action === 'close-detail') {
+      state.detailItemId = null;
       render();
       return;
     }
