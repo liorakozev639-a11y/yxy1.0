@@ -8,8 +8,10 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from main import create_app
+from mvp_orchestrator import PostgreSQLPlanRepository
 from questionnaire_module import PostgresQuestionnaireRepository, QuestionnaireService
 from session_module import PostgresSessionRepository, SessionService
+from task_repository import PUBLIC_TASKS
 
 
 class PhaseTwoApiLiveTests(unittest.TestCase):
@@ -19,6 +21,7 @@ class PhaseTwoApiLiveTests(unittest.TestCase):
             self.skipTest("需要设置 SESSION_DATABASE_URL")
         self.repository = PostgresSessionRepository(self.database_url)
         sessions = SessionService(self.repository)
+        PostgreSQLPlanRepository(self.database_url)
         questionnaire = QuestionnaireService(
             sessions,
             PostgresQuestionnaireRepository(self.database_url),
@@ -30,6 +33,10 @@ class PhaseTwoApiLiveTests(unittest.TestCase):
         self.plan_id = f"plan_phase_two_{self.session_id}"
         self.item_id = f"item_phase_two_{self.session_id}"
         self.late_item_id = f"item_phase_two_late_{self.session_id}"
+        self.task = next(
+            task for task in PUBLIC_TASKS
+            if task.feedback_group == "growth_reading_writing"
+        )
         now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         self.now = now
         with psycopg.connect(self.database_url) as connection:
@@ -50,7 +57,7 @@ class PhaseTwoApiLiveTests(unittest.TestCase):
                 INSERT INTO plan_items
                     (id, plan_id, task_id, title, category, start_at, end_at,
                      kind, status, locked)
-                VALUES (%s, %s, 'task_phase_two', '第二阶段测试任务', '自我成长', %s, %s,
+                VALUES (%s, %s, %s, %s, %s, %s, %s,
                         'task', 'pending', FALSE),
                        (%s, %s, 'task_phase_two_late', '第二阶段超时任务', '松弛疗愈', %s, %s,
                         'task', 'pending', FALSE)
@@ -58,6 +65,9 @@ class PhaseTwoApiLiveTests(unittest.TestCase):
                 (
                     self.item_id,
                     self.plan_id,
+                    self.task.id,
+                    self.task.title,
+                    self.task.category,
                     now,
                     now + timedelta(minutes=30),
                     self.late_item_id,
@@ -88,10 +98,14 @@ class PhaseTwoApiLiveTests(unittest.TestCase):
 
         feedback = self.client.post(
             f"/api/v1/plans/{self.plan_id}/items/{self.item_id}/feedback",
-            json={"rating": 5, "reasons": ["容易开始"]},
+            json={"rating": 1, "reasons": ["不喜欢"]},
         )
         self.assertEqual(feedback.status_code, 200, feedback.text)
-        self.assertEqual(feedback.json()["data"]["rating"], 5)
+        self.assertEqual(feedback.json()["data"]["rating"], 1)
+        self.assertEqual(
+            feedback.json()["data"]["recommendation_memory"]["excluded_group_count"],
+            1,
+        )
 
         listed = self.client.get(f"/api/v1/plans/{self.plan_id}/feedback")
         self.assertEqual(listed.status_code, 200, listed.text)

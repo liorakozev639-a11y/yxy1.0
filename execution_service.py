@@ -21,11 +21,17 @@ def make_id(prefix: str) -> str:
 class ExecutionService:
     """Apply execution actions and persist an append-only event trail."""
 
-    def __init__(self, database_url: str, sessions: Any) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        sessions: Any,
+        memory: Any | None = None,
+    ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.sessions = sessions
+        self.memory = memory
         self.init_schema()
 
     def _connect(self):
@@ -169,7 +175,17 @@ class ExecutionService:
                 "UPDATE plan_items SET status = %s WHERE id = %s AND plan_id = %s",
                 (item.status, item.id, plan_id),
             )
-        return self._payload(plan_id, item, events)
+        payload = self._payload(plan_id, item, events)
+        if action == "skip" and self.memory is not None:
+            self.memory.record_plan_item_exclusion(
+                session_id,
+                plan_id,
+                item_id,
+                "skipped",
+            )
+        if self.memory is not None:
+            payload["recommendation_memory"] = self.memory.summary(session_id)
+        return payload
 
     def check_deadline(
         self,

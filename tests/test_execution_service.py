@@ -7,7 +7,10 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 
 from execution_service import ExecutionService
+from mvp_orchestrator import PostgreSQLPlanRepository
+from recommendation_memory import RecommendationMemory
 from session_module import PostgresSessionRepository, SessionService
+from task_repository import PUBLIC_TASKS, TaskRepository
 
 
 class ExecutionServiceLiveTests(unittest.TestCase):
@@ -17,11 +20,16 @@ class ExecutionServiceLiveTests(unittest.TestCase):
             self.skipTest("需要设置 SESSION_DATABASE_URL")
         self.repository = PostgresSessionRepository(self.database_url)
         self.sessions = SessionService(self.repository)
+        PostgreSQLPlanRepository(self.database_url)
         self.session = self.sessions.create()
         self.session_id = self.session["session_id"]
         self.plan_id = f"plan_exec_test_{self.session_id}"
         self.item_id = f"item_exec_test_{self.session_id}"
         self.late_item_id = f"item_late_test_{self.session_id}"
+        self.task = next(
+            task for task in PUBLIC_TASKS
+            if task.feedback_group == "energy_mobility_home"
+        )
         self.now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
         with psycopg.connect(self.database_url) as connection:
             connection.execute(
@@ -47,7 +55,7 @@ class ExecutionServiceLiveTests(unittest.TestCase):
                 INSERT INTO plan_items
                     (id, plan_id, task_id, title, category, start_at, end_at,
                      kind, status, locked)
-                VALUES (%s, %s, 'task_exec', '测试执行任务', '活力充电', %s, %s,
+                VALUES (%s, %s, %s, %s, %s, %s, %s,
                         'task', 'pending', FALSE),
                        (%s, %s, 'task_late', '测试超时任务', '松弛疗愈', %s, %s,
                         'task', 'pending', FALSE)
@@ -55,6 +63,9 @@ class ExecutionServiceLiveTests(unittest.TestCase):
                 (
                     self.item_id,
                     self.plan_id,
+                    self.task.id,
+                    self.task.title,
+                    self.task.category,
                     self.now - timedelta(minutes=5),
                     self.now + timedelta(minutes=20),
                     self.late_item_id,
@@ -63,7 +74,16 @@ class ExecutionServiceLiveTests(unittest.TestCase):
                     self.now - timedelta(minutes=10),
                 ),
             )
-        self.service = ExecutionService(self.database_url, self.sessions)
+        self.memory = RecommendationMemory(
+            self.database_url,
+            self.sessions,
+            TaskRepository(),
+        )
+        self.service = ExecutionService(
+            self.database_url,
+            self.sessions,
+            memory=self.memory,
+        )
 
     def tearDown(self) -> None:
         self.repository.delete(self.session_id)
@@ -110,6 +130,22 @@ class ExecutionServiceLiveTests(unittest.TestCase):
         self.assertEqual(second["status"], "needs_adjustment")
         self.assertEqual(
             len(self.service.events(self.session_id, self.plan_id, self.late_item_id)),
+            1,
+        )
+
+    def test_execution_skip_records_an_exclusion(self) -> None:
+        payload = self.service.execute(
+            self.session_id,
+            self.plan_id,
+            self.item_id,
+            "skip",
+            now=self.now - timedelta(minutes=10),
+        )
+
+        self.assertEqual(payload["status"], "needs_adjustment")
+        self.assertEqual(payload["events"][0]["event_type"], "skipped")
+        self.assertEqual(
+            payload["recommendation_memory"]["excluded_group_count"],
             1,
         )
 

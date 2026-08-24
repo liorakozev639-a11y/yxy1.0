@@ -29,6 +29,7 @@ from mvp_orchestrator import (
     PostgreSQLProfileRepository,
 )
 from plan_module import PlanManagementService
+from recommendation_memory import RecommendationMemory
 from session_module import PostgresSessionRepository, SessionService
 from task_repository import TaskRepository
 
@@ -144,6 +145,7 @@ def build_services() -> tuple[SessionService, QuestionnaireService]:
 def build_orchestrator(
     session_service: SessionService,
     questionnaire_service: QuestionnaireService,
+    memory: RecommendationMemory | None = None,
 ) -> MVPOrchestrator:
     database_url = os.getenv("SESSION_DATABASE_URL")
     if not database_url:
@@ -157,6 +159,7 @@ def build_orchestrator(
         delivery=WebDeliveryService(
             PostgreSQLDeliveryRepository(database_url),
         ),
+        memory=memory,
     )
 
 
@@ -167,13 +170,29 @@ def create_app(
     plan_service: Optional[PlanManagementService] = None,
     execution_service: Optional[ExecutionService] = None,
     feedback_service: Optional[FeedbackService] = None,
+    memory: Optional[RecommendationMemory] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
     if session_service is None or questionnaire_service is None:
         session_service, questionnaire_service = build_services()
+    database_url = os.getenv("SESSION_DATABASE_URL")
+    if (
+        memory is None
+        and database_url
+        and isinstance(session_service, SessionService)
+    ):
+        memory = RecommendationMemory(
+            database_url,
+            session_service,
+            TaskRepository(),
+        )
     if orchestrator is None:
-        orchestrator = build_orchestrator(session_service, questionnaire_service)
+        orchestrator = build_orchestrator(
+            session_service,
+            questionnaire_service,
+            memory,
+        )
     if (
         plan_service is None
         and os.getenv("SESSION_DATABASE_URL")
@@ -192,6 +211,7 @@ def create_app(
         execution_service = ExecutionService(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
+            memory=memory,
         )
     if (
         feedback_service is None
@@ -201,6 +221,7 @@ def create_app(
         feedback_service = FeedbackService(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
+            memory=memory,
         )
 
     app = FastAPI(

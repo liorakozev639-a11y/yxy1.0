@@ -17,11 +17,17 @@ def make_id(prefix: str) -> str:
 
 
 class FeedbackService:
-    def __init__(self, database_url: str, sessions: Any) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        sessions: Any,
+        memory: Any | None = None,
+    ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.sessions = sessions
+        self.memory = memory
         self.init_schema()
 
     def _connect(self):
@@ -139,7 +145,18 @@ class FeedbackService:
             ).fetchone()
             if row is None:
                 raise HTTPException(status_code=500, detail="反馈保存失败")
-            return self._row_payload(row)
+
+        payload = self._row_payload(row)
+        if rating <= 2 and self.memory is not None:
+            self.memory.record_plan_item_exclusion(
+                session_id,
+                plan_id,
+                item_id,
+                "low_rating",
+            )
+        if rating <= 2 and self.memory is not None:
+            payload["recommendation_memory"] = self.memory.summary(session_id)
+        return payload
 
     def list_for_plan(self, session_id: str, plan_id: str) -> list[dict[str, Any]]:
         self.sessions.require_active(session_id)
