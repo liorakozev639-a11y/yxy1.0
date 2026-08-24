@@ -7,6 +7,36 @@ from task_repository import Task
 
 
 class PlanReplacementRuleTests(unittest.TestCase):
+    def test_select_replacement_excludes_history_and_feedback_group(self) -> None:
+        tasks = [
+            Task(
+                "seen", "已替换过", "乐享探索", 20, 0, "home", "solo",
+                feedback_group="explore_game_relax",
+            ),
+            Task(
+                "disliked", "不喜欢的同组", "乐享探索", 20, 0, "home", "solo",
+                feedback_group="explore_food_drink",
+            ),
+            Task(
+                "fresh", "新的任务", "乐享探索", 20, 0, "home", "solo",
+                feedback_group="explore_local_browse",
+            ),
+        ]
+
+        replacement = select_replacement_task(
+            candidates=tasks,
+            category="乐享探索",
+            used_task_ids={"seen"},
+            budget_limit=20,
+            max_duration=30,
+            outing="home",
+            company="solo",
+            excluded_feedback_groups={"explore_food_drink"},
+        )
+
+        self.assertIsNotNone(replacement)
+        self.assertEqual(replacement.id, "fresh")
+
     def test_select_replacement_keeps_category_and_relaxes_budget(self) -> None:
         tasks = [
             Task("used_strict", "已在计划内的严格匹配", "松弛疗愈", 20, 0, "home", "solo"),

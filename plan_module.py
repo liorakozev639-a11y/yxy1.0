@@ -50,13 +50,16 @@ def select_replacement_task(
     outing: str,
     company: str,
     preferred_task_id: str | None = None,
+    excluded_feedback_groups: set[str] | None = None,
 ) -> Task | None:
+    excluded = excluded_feedback_groups or set()
     available = [
         task
         for task in candidates
         if task.status == "approved"
         and task.category == category
         and task.id not in used_task_ids
+        and task.feedback_group not in excluded
     ]
     if preferred_task_id:
         preferred = next(
@@ -176,17 +179,29 @@ def enrich_plan_item_payload(item: dict[str, Any], task: Task | None = None) -> 
 class PlanManagementService:
     """Read and mutate plans while keeping every user change versioned."""
 
-    def __init__(self, database_url: str, sessions: Any, orchestrator: Any) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        sessions: Any,
+        orchestrator: Any,
+        memory: Any | None = None,
+    ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.sessions = sessions
         self.orchestrator = orchestrator
+        self.memory = memory
         self.tasks = TaskRepository()
         self.init_schema()
 
     def _connect(self):
         return psycopg.connect(self.database_url)
+
+    def _excluded_groups(self, session_id: str) -> set[str]:
+        if self.memory is None:
+            return set()
+        return self.memory.list_excluded_groups(session_id)
 
     def init_schema(self) -> None:
         with self._connect() as connection:
@@ -398,12 +413,21 @@ class PlanManagementService:
     def skip_item(self, session_id: str, plan_id: str, item_id: str, expected_version: int) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)
         self._check_version(plan, expected_version)
-        self._find_item(plan, item_id)
+        current = self._find_item(plan, item_id)
         items = [dict(item) for item in plan["items"]]
         for item in items:
             if item["id"] == item_id:
                 item["status"] = "skipped"
-        return self._save_version(plan, items)
+        saved = self._save_version(plan, items)
+        if current["kind"] == "task" and self.memory is not None:
+            self.memory.record_plan_item_exclusion(
+                session_id,
+                plan_id,
+                item_id,
+                "skipped",
+            )
+            saved["recommendation_memory"] = self.memory.summary(session_id)
+        return saved
 
     def replace_item(self, session_id: str, plan_id: str, item_id: str, expected_version: int, replacement_task_id: str | None = None) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)
@@ -430,9 +454,13 @@ class PlanManagementService:
             outing=session.preferences.get("outing", "any"),
             company=session.preferences.get("company", "both"),
             preferred_task_id=replacement_task_id,
+            excluded_feedback_groups=self._excluded_groups(session_id),
         )
         if candidate is None:
-            raise HTTPException(status_code=409, detail="当前约束下没有可替换任务")
+            raise HTTPException(
+                status_code=409,
+                detail="当前偏好与约束下该分类没有未排除任务",
+            )
         start = self._parse_time(current["start_at"])
         end = self._parse_time(current["end_at"])
         self._ensure_slot(plan, start, end, item_id)
@@ -440,7 +468,10 @@ class PlanManagementService:
         for item in items:
             if item["id"] == item_id:
                 item.update(build_replaced_item(item, candidate))
-        return self._save_version(plan, items)
+        saved = self._save_version(plan, items)
+        if self.memory is not None:
+            saved["recommendation_memory"] = self.memory.summary(session_id)
+        return saved
 
     def add_custom_task(self, session_id: str, plan_id: str, expected_version: int, title: str, duration_minutes: int, category: str | None = None) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)
@@ -501,4 +532,7 @@ class PlanManagementService:
                 density=density or plan["density"],
             ),
         )
-        return result["plan"]
+        payload = result["plan"]
+        if self.memory is not None:
+            payload["recommendation_memory"] = self.memory.summary(session_id)
+        return payload

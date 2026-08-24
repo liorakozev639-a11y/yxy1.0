@@ -202,6 +202,7 @@ def create_app(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
             orchestrator,
+            memory=memory,
         )
     if (
         execution_service is None

@@ -97,6 +97,7 @@ class PlanModuleLiveTests(unittest.TestCase):
         self.assertEqual(skipped.status_code, 200, skipped.text)
         plan = skipped.json()["data"]
         self.assertEqual(plan["version"], 3)
+        self.assertEqual(plan["recommendation_memory"]["excluded_group_count"], 1)
 
         confirmed = self.client.post(
             f"/api/v1/plans/{plan['plan_id']}/confirm",
