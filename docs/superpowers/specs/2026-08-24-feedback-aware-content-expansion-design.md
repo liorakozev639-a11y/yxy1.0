@@ -14,7 +14,7 @@
 2. 用户主动跳过计划任务后，系统同样不再推荐该任务及同组任务。
 3. 排除规则覆盖首次生成计划、替换单个任务和重新生成计划三个入口。
 4. 公共任务库从 150 条扩展为 200 条，五个分类各 40 条；内容继续保持可离线运行的通用活动，不依赖地图、商户或实时活动 API。
-5. 正式运行的问卷库从现有 55 条扩展为 105 条，五个分类各 21 条；快速问卷只从 `quick` 与 `both` 题目中抽取 5 题，深度问卷只从 `deep` 与 `both` 题目中抽取 30 题。
+5. 正式运行的问卷库从现有 50 条扩展为 150 条，五个分类各 30 条；快速问卷只从 `quick` 与 `both` 题目中抽取 5 题，深度问卷只从 `deep` 与 `both` 题目中抽取 30 题。
 6. 前端明确告知当前计划已避开的任务数量，使用户知道低评分和跳过操作已产生效果。
 
 ### 1.2 非目标
@@ -71,7 +71,7 @@ id, mode, category, dimension, prompt, reverse_scored,
 eligible_outing, eligible_company, scenario_tags, priority, status
 ```
 
-新增 50 题，五个分类各 10 题。扩充后共 105 题、每类 21 题。题目遵守：
+新增 100 题，五个分类各 20 题。扩充后共 150 题、每类 30 题。题目遵守：
 
 - 单题只表达一个偏好；
 - 与空闲时间场景相关；
@@ -208,7 +208,7 @@ summary(session_id) -> { excluded_group_count, excluded_task_count }
 ### 8.1 单元测试
 
 1. 公共任务总数为 200，五类各 40，所有任务具有有效 `feedback_group`。
-2. 正式问卷总数为 105，五类各 21；快速版只返回 `quick/both`，深度版只返回 `deep/both`，并且无重复。
+2. 正式问卷总数为 150，五类各 30；快速版只返回 `quick/both`，深度版只返回 `deep/both`，并且无重复。
 3. 不同前置偏好得到不同的快速问卷组合，且均覆盖所选分类。
 4. 评分 1、2 创建排除记录；评分 3、4、5 不创建记录。
 5. 跳过计划项和执行跳过都创建排除记录，重复调用不产生重复组。
@@ -228,7 +228,7 @@ summary(session_id) -> { excluded_group_count, excluded_task_count }
 | 文件 | 责任 |
 | --- | --- |
 | `task_repository.py` | 200 条公共任务、`feedback_group` 与任务筛选 |
-| `questionnaire_module.py` | 唯一正式问卷库、105 条题目、模式硬过滤与偏好排序 |
+| `questionnaire_module.py` | 唯一正式问卷库、150 条题目、模式硬过滤与偏好排序 |
 | `recommendation_memory.py` | 会话级排除表、记录、读取和统计 |
 | `feedback_service.py` | 低分触发排除记忆 |
 | `execution_service.py` | 执行阶段跳过触发排除记忆 |
@@ -242,4 +242,4 @@ summary(session_id) -> { excluded_group_count, excluded_task_count }
 
 ## 10. 成功标准
 
-在同一会话中，用户给某项任务打 1–2 分或跳过它后，无论是重新生成计划还是多次替换任务，系统都不会再提供该任务或同一细分 `feedback_group` 的任务。新的 200 条任务和 105 条正式问卷题均由实际主流程使用，且现有本地 PostgreSQL、后端 API 与像素前端主流程保持可运行。
+在同一会话中，用户给某项任务打 1–2 分或跳过它后，无论是重新生成计划还是多次替换任务，系统都不会再提供该任务或同一细分 `feedback_group` 的任务。新的 200 条任务和 150 条正式问卷题均由实际主流程使用，且现有本地 PostgreSQL、后端 API 与像素前端主流程保持可运行。

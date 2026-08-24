@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 1–2 分和跳过操作在当前会话内永久排除同组任务，并将正式任务库扩展为 200 条、正式问卷库扩展为 105 题。
+**Goal:** 让 1–2 分和跳过操作在当前会话内永久排除同组任务，并将正式任务库扩展为 200 条、正式问卷库扩展为 150 题。
 
 **Architecture:** 新建 `recommendation_memory.py` 作为唯一的会话级负向偏好存储边界；推荐、替换和重排只读取它提供的细分组集合。正式题目只由 `questionnaire_module.py` 提供，`task_repository.py` 只维护公共任务与任务筛选。
 
@@ -16,7 +16,7 @@
 - 排除规则只存在于当前 `session_id` 及其后续生成的计划；不新增登录或跨会话记忆。
 - 评分阈值固定为 `1`、`2`；评分 `3`、`4`、`5` 只保存反馈。
 - 相似任务按细分 `feedback_group` 排除，不能按五大 `category` 整类排除。
-- 公共任务总数必须为 200、每类 40；正式问卷总数必须为 105、每类 21。
+- 公共任务总数必须为 200、每类 40；正式问卷总数必须为 150、每类 30。
 - 快速版只可抽取 `quick`、`both`；深度版只可抽取 `deep`、`both`。
 - 保持现有 API 路径、无 Token 会话方式与像素前端风格；新增字段必须向后兼容。
 - 每个任务先写失败测试，再写最小实现，验证通过后单独提交；不得提交 `backup-before-github-20260814-1/`。
@@ -28,7 +28,7 @@
 | 文件 | 修改类型 | 责任 |
 | --- | --- | --- |
 | `task_repository.py` | 修改 | 200 条公共任务、`feedback_group`、删除未使用的重复问卷库 |
-| `questionnaire_module.py` | 修改 | 105 条正式题目、模式硬过滤与偏好排序 |
+| `questionnaire_module.py` | 修改 | 150 条正式题目、模式硬过滤与偏好排序 |
 | `recommendation_memory.py` | 新建 | `session_task_exclusions` 初始化、记录、读取和统计 |
 | `feedback_service.py` | 修改 | 低分反馈写入排除记忆 |
 | `execution_service.py` | 修改 | 执行阶段跳过写入排除记忆 |
@@ -139,17 +139,17 @@ git commit -m "feat: expand task library with feedback groups"
 
 **Interfaces:**
 - Consumes: `QuestionnaireService.select_questions(mode, preferences)`。
-- Produces: 105 条 `QUESTION_BANK`、每类 21 条；快速版只含 `quick/both`，深度版只含 `deep/both`。
+- Produces: 150 条 `QUESTION_BANK`、每类 30 条；快速版只含 `quick/both`，深度版只含 `deep/both`。
 
 - [ ] **Step 1: 写入题库数量、分类分布、模式边界的失败测试**
 
 ```python
-def test_question_bank_contains_one_hundred_and_five_approved_questions():
-    assert len(QUESTION_BANK) == 105
+def test_question_bank_contains_one_hundred_and_fifty_approved_questions():
+    assert len(QUESTION_BANK) == 150
     assert {
         category: sum(question.category == category for question in QUESTION_BANK)
         for category in CATEGORIES
-    } == {category: 21 for category in CATEGORIES}
+    } == {category: 30 for category in CATEGORIES}
     assert all(question.status == "approved" for question in QUESTION_BANK)
 
 
@@ -179,7 +179,7 @@ Expected: 题库数量断言失败；现有候选逻辑会允许错误模式的�
 
 - [ ] **Step 3: 扩展 `QUESTION_ROWS` 并实现模式硬过滤**
 
-向 `QUESTION_ROWS` 每个分类追加 10 条，使每类从 11 条到 21 条。新增题目分别覆盖下列主题：活力充电覆盖低冲击有氧、户外走动、居家活动度、核心平衡、骑行、节奏运动、短时启动、恢复后训练、同伴轻运动、晒太阳走动；松弛疗愈覆盖呼吸放松、低刺激休息、热饮仪式、音乐休息、独处、肌肉放松、轻整理、户外静坐、睡前放松、压力卸载；社交连接覆盖熟人互动、家人联系、轻量消息、共同进餐、结伴散步、桌游、同学联系、低压力邀约、分享兴趣、感谢表达；乐享探索覆盖咖啡茶饮、轻食、街区漫游、屏幕娱乐、轻游戏、拍照、免费公共空间、简单制作、书店文创、短时尝鲜；自我成长覆盖阅读笔记、文件整理、速写手工、语言练习、知识播客、课程复习、微技能、生活计划、乐器练习、作品清单。
+向 `QUESTION_ROWS` 每个分类追加 20 条，使每类从 10 条到 30 条。新增题目分别覆盖下列 20 个细分偏好：活力充电覆盖低冲击有氧、户外走动、居家活动度、核心平衡、骑行、节奏运动、短时启动、恢复后训练、同伴轻运动、晒太阳走动，以及十个关于强度、节奏、独处与装备门槛的单一偏好；松弛疗愈覆盖呼吸放松、低刺激休息、热饮仪式、音乐休息、独处、肌肉放松、轻整理、户外静坐、睡前放松、压力卸载，以及十个关于空间、手机、照顾与休息节奏的单一偏好；社交连接、乐享探索和自我成长也各使用二十条单一偏好题覆盖其场景、成本、社交压力和完成方式。
 
 在 `select_questions` 中首先限定模式，再执行出行和同行过滤：
 
@@ -622,7 +622,7 @@ function exclusionSummary(memory) {
 
 在结果页时间线顶部或右侧状态面板渲染该文字，不显示内部组名。保存反馈后：评分 <= 2 显示 反馈已保存，之后会避开这类任务，否则显示 反馈已保存。执行跳过与编辑跳过成功后均显示 任务已跳过，之后会避开相似任务。替换、重排、首次生成计划成功后用返回的 memory 更新状态。
 
-在 README.md 更新任务数为 200、正式问卷数为 105，并说明 1–2 分/跳过在当前会话内影响下一次推荐、替换和重排。docs/api.md 为反馈、两类跳过、生成、替换和重排响应补充 recommendation_memory JSON 示例；说明它不跨会话保存。
+在 README.md 更新任务数为 200、正式问卷数为 150，并说明 1–2 分/跳过在当前会话内影响下一次推荐、替换和重排。docs/api.md 为反馈、两类跳过、生成、替换和重排响应补充 recommendation_memory JSON 示例；说明它不跨会话保存。
 
 - [ ] **Step 4: 运行前端、后端完整回归与静态检查**
 

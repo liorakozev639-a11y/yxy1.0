@@ -10,11 +10,11 @@ class QuestionnaireSelectionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = QuestionnaireService.__new__(QuestionnaireService)
 
-    def test_question_bank_contains_fifty_approved_questions(self) -> None:
-        self.assertEqual(len(QUESTION_BANK), 50)
+    def test_question_bank_contains_one_hundred_and_fifty_approved_questions(self) -> None:
+        self.assertEqual(len(QUESTION_BANK), 150)
         self.assertEqual(
             {category: sum(question.category == category for question in QUESTION_BANK) for category in CATEGORIES},
-            {category: 10 for category in CATEGORIES},
+            {category: 30 for category in CATEGORIES},
         )
         self.assertTrue(all(question.status == "approved" for question in QUESTION_BANK))
 
@@ -78,6 +78,23 @@ class QuestionnaireSelectionTests(unittest.TestCase):
                 {question.category for question in selected}
             )
         )
+
+    def test_modes_are_hard_filtered_before_preference_ranking(self) -> None:
+        preferences = {
+            "categories": ["活力充电", "松弛疗愈", "社交连接"],
+            "outing": "nearby",
+            "company": "both",
+            "duration": "day",
+            "budget": "medium",
+        }
+
+        quick = self.service.select_questions("quick", preferences)
+        deep = self.service.select_questions("deep", preferences)
+
+        self.assertEqual(len(quick), 5)
+        self.assertEqual(len(deep), 30)
+        self.assertTrue(all(question.mode in {"quick", "both"} for question in quick))
+        self.assertTrue(all(question.mode in {"deep", "both"} for question in deep))
 
 
 if __name__ == "__main__":
