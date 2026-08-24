@@ -7,6 +7,41 @@ from task_repository import Task
 
 
 class RecommendationReasonTests(unittest.TestCase):
+    def test_recommendation_excludes_feedback_groups_before_category_coverage(self) -> None:
+        tasks = [
+            Task(
+                id="quiet",
+                title="居家呼吸练习",
+                category="松弛疗愈",
+                duration=10,
+                budget=0,
+                outing="home",
+                company="solo",
+                feedback_group="recovery_quiet_home",
+            ),
+            Task(
+                id="outdoor",
+                title="公园慢走",
+                category="松弛疗愈",
+                duration=30,
+                budget=0,
+                outing="nearby",
+                company="solo",
+                feedback_group="recovery_quiet_outdoor",
+            ),
+        ]
+
+        result = recommend_tasks(
+            profile={"scores": {"松弛疗愈": 1.0}},
+            selected_categories=["松弛疗愈"],
+            candidates=tasks,
+            excluded_feedback_groups={"recovery_quiet_home"},
+        )
+
+        self.assertEqual([task["id"] for task in result["tasks"]], ["outdoor"])
+        self.assertEqual(result["recommendation_memory"]["excluded_group_count"], 1)
+        self.assertEqual(result["recommendation_memory"]["excluded_task_count"], 1)
+
     def test_recommended_tasks_include_rule_based_tags_and_reason_text(self) -> None:
         tasks = [
             Task(

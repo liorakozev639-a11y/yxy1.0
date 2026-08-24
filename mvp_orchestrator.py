@@ -331,13 +331,23 @@ class PostgreSQLPlanRepository:
 
 
 class MVPOrchestrator:
-    def __init__(self, sessions, questionnaire, tasks, profiles, plans, delivery):
+    def __init__(
+        self,
+        sessions,
+        questionnaire,
+        tasks,
+        profiles,
+        plans,
+        delivery,
+        memory=None,
+    ):
         self.sessions = sessions
         self.questionnaire = questionnaire
         self.tasks = tasks
         self.profiles = profiles
         self.plans = plans
         self.delivery = delivery
+        self.memory = memory
 
     def generate_plan(
         self,
@@ -443,7 +453,18 @@ class MVPOrchestrator:
             categories=categories,
             scenarios=constraints.get("scenarios"),
         )
-        result = recommend_tasks(profile, categories, candidates, limit=10)
+        excluded_groups = (
+            self.memory.list_excluded_groups(profile["session_id"])
+            if self.memory is not None
+            else set()
+        )
+        result = recommend_tasks(
+            profile,
+            categories,
+            candidates,
+            limit=10,
+            excluded_feedback_groups=excluded_groups,
+        )
         result["candidate_count"] = len(candidates)
         result["constraints"] = constraints
         return result

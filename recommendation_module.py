@@ -12,6 +12,7 @@ def recommend_tasks(
     selected_categories: list[str],
     candidates: list[Task],
     limit: int = 10,
+    excluded_feedback_groups: set[str] | None = None,
 ) -> dict[str, Any]:
     if not selected_categories:
         raise ValueError("至少需要选择一个活动分类")
@@ -21,6 +22,7 @@ def recommend_tasks(
         raise ValueError("存在不支持的活动分类")
 
     selected_category_set = set(selected_categories)
+    excluded = excluded_feedback_groups or set()
     scores = profile.get("scores", {})
     preference_map = {
         category: float(scores.get(category, 0))
@@ -33,6 +35,7 @@ def recommend_tasks(
         for task in candidates
         if task.status == "approved"
         and task.category in selected_category_set
+        and task.feedback_group not in excluded
     ]
     ranked = sorted(
         usable,
@@ -95,6 +98,12 @@ def recommend_tasks(
         "covered_categories": sorted(covered),
         "missing_categories": missing,
         "reasons": reasons,
+        "recommendation_memory": {
+            "excluded_group_count": len(excluded),
+            "excluded_task_count": sum(
+                task.feedback_group in excluded for task in candidates
+            ),
+        },
     }
 
 
@@ -290,6 +299,7 @@ def build_recommendation(
     selected_categories: list[str],
     repository: TaskRepository,
     limit: int = 10,
+    excluded_feedback_groups: set[str] | None = None,
 ) -> dict[str, Any]:
     """Run the complete Profile -> Task Repository -> Recommendation flow."""
     constraints = profile.get("constraints", {})
@@ -308,6 +318,7 @@ def build_recommendation(
         selected_categories=selected_categories,
         candidates=candidates,
         limit=limit,
+        excluded_feedback_groups=excluded_feedback_groups,
     )
     result["candidate_count"] = len(candidates)
     result["constraints"] = constraints

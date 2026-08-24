@@ -86,6 +86,16 @@ class FakeDeliveryService:
         return delivery
 
 
+class FakeRecommendationMemory:
+    def __init__(self, excluded_groups):
+        self.excluded_groups = set(excluded_groups)
+
+    def list_excluded_groups(self, session_id):
+        if session_id != "sess_integration":
+            raise AssertionError("unexpected session")
+        return set(self.excluded_groups)
+
+
 class FakeOrchestrator:
     def build_profile_insight(self, session_id):
         return {
@@ -112,6 +122,39 @@ class FakeOrchestrator:
 
 
 class MVPIntegrationTests(unittest.TestCase):
+    def test_initial_recommendation_uses_session_exclusions(self):
+        orchestrator = MVPOrchestrator(
+            sessions=FakeSessionService({}),
+            questionnaire=None,
+            tasks=TaskRepository(),
+            profiles=None,
+            plans=None,
+            delivery=None,
+            memory=FakeRecommendationMemory({"recovery_quiet_home"}),
+        )
+        profile = {
+            "session_id": "sess_integration",
+            "scores": {"松弛疗愈": 1.0},
+            "constraints": {
+                "budget_limit": 40,
+                "max_duration": 270,
+                "outing": "home",
+                "company": "solo",
+                "scenarios": None,
+            },
+        }
+
+        result = orchestrator._recommend(profile, ["松弛疗愈"])
+
+        self.assertTrue(result["tasks"])
+        self.assertTrue(
+            all(
+                task["feedback_group"] != "recovery_quiet_home"
+                for task in result["tasks"]
+            )
+        )
+        self.assertEqual(result["recommendation_memory"]["excluded_group_count"], 1)
+
     def test_group_nearby_medium_tasks_cover_selected_categories(self):
         selected_categories = ["松弛疗愈", "社交连接", "乐享探索"]
 
