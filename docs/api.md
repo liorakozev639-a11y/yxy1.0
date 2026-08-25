@@ -115,6 +115,45 @@ Swagger：`http://127.0.0.1:8000/docs`
 
 `item_id` 可选；不传时返回整个计划的执行事件。
 
+### 刷新网页内执行提醒
+
+`POST /api/v1/plans/{plan_id}/execution/refresh`
+
+不需要请求体。服务端以自身当前时间批量检查当前计划中处于 `pending` 或 `active` 的任务；已过 `end_at` 的任务只会一次性变为 `needs_adjustment` 并写入执行事件。
+
+返回任务状态、当次新增事件和网页提醒摘要：
+
+```json
+{
+  "plan_id": "plan_xxx",
+  "reminders": {
+    "startable_titles": ["居家拉伸"],
+    "ending_soon_titles": [],
+    "needs_adjustment_count": 0
+  }
+}
+```
+
+前端仅在计划页打开时调用一次并每 30 秒轮询；关闭或离开页面后不会继续提醒。
+
+## Review
+
+### 保存完成感受
+
+`POST /api/v1/plans/{plan_id}/items/{item_id}/reflection`
+
+```json
+{"sentiment": "satisfied"}
+```
+
+`sentiment` 只能是 `satisfied`、`neutral` 或 `dissatisfied`。仅 `completed` 任务可保存，未完成任务返回 `409`；非法值由请求模型返回 `422`。同一任务再次提交会覆盖当前感受，不会新增第二条记录。
+
+### 获取统一复盘
+
+`GET /api/v1/plans/{plan_id}/review`
+
+接口会先执行一次服务端截止检查，再返回 `in_progress` 或 `finished`、完成/跳过/未完成数量、三档感受数量、逐项结果和确定性建议。只有服务端当前时间达到计划的 `free_end` 后，`status` 才为 `finished`。
+
 ## Feedback
 
 只有状态为 `completed` 的任务可以提交反馈。同一计划中的同一任务重复提交会更新原记录。
@@ -141,8 +180,9 @@ Swagger：`http://127.0.0.1:8000/docs`
 ### 典型执行顺序
 
 ```text
-生成计划 → 确认计划 → 开始任务 → 完成任务 → 提交反馈
-                         ↘ 超时检查 → needs_adjustment → 重新排程
+生成计划 → 确认计划 → 开始任务 → 完成任务 → 提交反馈 / 可选完成感受
+                         ↘ 网页刷新检查 → needs_adjustment → 重新排程
+计划结束 → 统一复盘 → 查看完成、跳过、未完成与下次建议
 ```
 
 ## 错误

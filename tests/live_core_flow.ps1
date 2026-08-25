@@ -51,6 +51,43 @@ $generated = Invoke-RestMethod -Method Post `
 $restoredPlan = Invoke-RestMethod -Method Get `
   -Uri "$BaseUrl/api/v1/sessions/$sessionId/plan"
 
+$taskItem = $generated.data.plan.items |
+  Where-Object { $_.kind -eq "task" } |
+  Select-Object -First 1
+if ($null -eq $taskItem) {
+  throw "生成的计划中没有可执行任务"
+}
+
+$executionNow = [DateTimeOffset]::Now.ToString("o")
+$executionBody = @{ now = $executionNow } | ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri "$BaseUrl/api/v1/plans/$($generated.data.plan.plan_id)/items/$($taskItem.id)/execution/start" `
+  -ContentType "application/json" `
+  -Body $executionBody | Out-Null
+
+Invoke-RestMethod -Method Post `
+  -Uri "$BaseUrl/api/v1/plans/$($generated.data.plan.plan_id)/items/$($taskItem.id)/execution/complete" `
+  -ContentType "application/json" `
+  -Body $executionBody | Out-Null
+
+$refresh = Invoke-RestMethod -Method Post `
+  -Uri "$BaseUrl/api/v1/plans/$($generated.data.plan.plan_id)/execution/refresh"
+
+$reflection = Invoke-RestMethod -Method Post `
+  -Uri "$BaseUrl/api/v1/plans/$($generated.data.plan.plan_id)/items/$($taskItem.id)/reflection" `
+  -ContentType "application/json" `
+  -Body '{"sentiment":"satisfied"}'
+
+$review = Invoke-RestMethod -Method Get `
+  -Uri "$BaseUrl/api/v1/plans/$($generated.data.plan.plan_id)/review"
+
+if ($reflection.data.sentiment -ne "satisfied") {
+  throw "完成感受未保存"
+}
+if ($null -eq $review.data.summary) {
+  throw "复盘摘要未返回"
+}
+
 [pscustomobject]@{
   session_id = $sessionId
   questionnaire_total = $questionnaire.data.total
@@ -60,6 +97,9 @@ $restoredPlan = Invoke-RestMethod -Method Get `
   plan_id = $generated.data.plan.plan_id
   plan_items = $generated.data.plan.items.Count
   restored_plan_id = $restoredPlan.data.plan_id
+  reminder_count = $refresh.data.reminders.needs_adjustment_count
+  review_status = $review.data.status
+  reflection = $reflection.data.sentiment
 } | ConvertTo-Json -Depth 8
 
 Write-Output "Test session: $sessionId"
