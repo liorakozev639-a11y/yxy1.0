@@ -33,6 +33,7 @@ from plan_module import PlanManagementService
 from recommendation_memory import RecommendationMemory
 from session_module import PostgresSessionRepository, SessionService
 from task_repository import TaskRepository
+from user_history_service import UserHistoryService
 
 
 ALLOWED_ORIGINS = [
@@ -68,6 +69,11 @@ class GeneratePlanInput(BaseModel):
     free_start: datetime
     free_end: datetime
     density: Literal["light", "balanced", "full"] = "balanced"
+    user_id: Optional[str] = None
+
+
+class AnonymousUserInput(BaseModel):
+    user_id: Optional[str] = None
 
 
 class PlanItemTimeInput(BaseModel):
@@ -78,6 +84,7 @@ class PlanItemTimeInput(BaseModel):
 
 class PlanItemMutationInput(BaseModel):
     expected_version: int = Field(ge=1)
+    user_id: Optional[str] = None
 
 
 class PlanReplaceInput(PlanItemMutationInput):
@@ -102,6 +109,12 @@ class PlanReplanInput(BaseModel):
 
 class ExecutionTimeInput(BaseModel):
     now: Optional[datetime] = None
+    user_id: Optional[str] = None
+
+
+class ExecutionPrepareInput(BaseModel):
+    user_id: Optional[str] = None
+    energy: Literal["high", "medium", "low"]
 
 
 class FeedbackInput(BaseModel):
@@ -151,6 +164,7 @@ def build_orchestrator(
     session_service: SessionService,
     questionnaire_service: QuestionnaireService,
     memory: RecommendationMemory | None = None,
+    user_history: UserHistoryService | None = None,
 ) -> MVPOrchestrator:
     database_url = os.getenv("SESSION_DATABASE_URL")
     if not database_url:
@@ -165,6 +179,7 @@ def build_orchestrator(
             PostgreSQLDeliveryRepository(database_url),
         ),
         memory=memory,
+        user_history=user_history,
     )
 
 
@@ -177,6 +192,7 @@ def create_app(
     feedback_service: Optional[FeedbackService] = None,
     review_service: Optional[ReviewService] = None,
     memory: Optional[RecommendationMemory] = None,
+    user_history: Optional[UserHistoryService] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
@@ -193,11 +209,14 @@ def create_app(
             session_service,
             TaskRepository(),
         )
+    if user_history is None and database_url:
+        user_history = UserHistoryService(database_url, TaskRepository())
     if orchestrator is None:
         orchestrator = build_orchestrator(
             session_service,
             questionnaire_service,
             memory,
+            user_history,
         )
     if (
         plan_service is None
@@ -209,6 +228,7 @@ def create_app(
             session_service,
             orchestrator,
             memory=memory,
+            user_history=user_history,
         )
     if (
         execution_service is None
@@ -219,6 +239,7 @@ def create_app(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
             memory=memory,
+            user_history=user_history,
         )
     if (
         feedback_service is None
@@ -309,6 +330,18 @@ def create_app(
     def create_session() -> dict[str, Any]:
         return success(session_service.create())
 
+    @app.post("/api/v1/users/anonymous")
+    def create_anonymous_user(body: AnonymousUserInput) -> dict[str, Any]:
+        if user_history is None:
+            raise HTTPException(status_code=503, detail="用户历史服务未配置")
+        return success(user_history.ensure_user(body.user_id))
+
+    @app.get("/api/v1/users/{user_id}/history/summary")
+    def get_user_history_summary(user_id: str) -> dict[str, Any]:
+        if user_history is None:
+            raise HTTPException(status_code=503, detail="用户历史服务未配置")
+        return success(user_history.summary(user_id))
+
     @app.get("/api/v1/sessions/{session_id}")
     def get_session(session_id: str) -> dict[str, Any]:
         return success(session_service.restore(session_id))
@@ -393,6 +426,7 @@ def create_app(
                     free_end=body.free_end,
                     density=body.density,
                 ),
+                user_id=body.user_id,
             )
         )
 
@@ -460,6 +494,7 @@ def create_app(
                 item_id,
                 body.expected_version,
                 body.replacement_task_id,
+                body.user_id,
             )
         )
 
@@ -472,6 +507,20 @@ def create_app(
         manager = require_plan_service()
         session_id = _session_id_from_plan(manager, plan_id)
         return success(manager.skip_item(session_id, plan_id, item_id, body.expected_version))
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/replace-easier")
+    def replace_plan_item_easier(
+        plan_id: str,
+        item_id: str,
+        body: PlanItemMutationInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            manager.replace_item_easier(
+                session_id, plan_id, item_id, body.expected_version, body.user_id
+            )
+        )
 
     @app.post("/api/v1/plans/{plan_id}/custom-tasks")
     def add_custom_task(plan_id: str, body: CustomTaskInput) -> dict[str, Any]:
@@ -516,6 +565,7 @@ def create_app(
                 item_id,
                 action,
                 now=body.now,
+                user_id=body.user_id,
             )
         )
 
@@ -526,6 +576,19 @@ def create_app(
         body: ExecutionTimeInput,
     ) -> dict[str, Any]:
         return execute_plan_item(plan_id, item_id, "start", body)
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/execution/prepare")
+    def prepare_execution(
+        plan_id: str,
+        item_id: str,
+        body: ExecutionPrepareInput,
+    ) -> dict[str, Any]:
+        return success({
+            "item_id": item_id,
+            "energy": body.energy,
+            "recommended_action": "replace_easier" if body.energy == "low" else "start",
+            "can_start": body.energy in {"high", "medium"},
+        })
 
     @app.post("/api/v1/plans/{plan_id}/items/{item_id}/execution/complete")
     def complete_execution(

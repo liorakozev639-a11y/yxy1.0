@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,6 +13,9 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from execution_module import ExecutionError, PlanItem, execute_action, expire_if_needed
+
+
+logger = logging.getLogger(__name__)
 
 
 def make_id(prefix: str) -> str:
@@ -26,12 +30,14 @@ class ExecutionService:
         database_url: str,
         sessions: Any,
         memory: Any | None = None,
+        user_history: Any | None = None,
     ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.sessions = sessions
         self.memory = memory
+        self.user_history = user_history
         self.init_schema()
 
     def _connect(self):
@@ -154,6 +160,7 @@ class ExecutionService:
         item_id: str,
         action: str,
         now: datetime | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         current = self._now(now)
         with self._connect() as connection:
@@ -183,6 +190,17 @@ class ExecutionService:
                 item_id,
                 "skipped",
             )
+        if self.user_history is not None and user_id and action in {"complete", "skip"}:
+            try:
+                self.user_history.record_action(
+                    user_id,
+                    session_id,
+                    plan_id,
+                    item_id,
+                    "completed" if action == "complete" else "skipped",
+                )
+            except Exception:
+                logger.exception("用户历史写入失败，不影响执行流程")
         if self.memory is not None:
             payload["recommendation_memory"] = self.memory.summary(session_id)
         return payload

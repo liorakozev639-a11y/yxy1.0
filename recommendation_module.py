@@ -13,6 +13,8 @@ def recommend_tasks(
     candidates: list[Task],
     limit: int = 10,
     excluded_feedback_groups: set[str] | None = None,
+    history_weights: dict[str, Any] | None = None,
+    history_excluded_groups: set[str] | None = None,
 ) -> dict[str, Any]:
     if not selected_categories:
         raise ValueError("至少需要选择一个活动分类")
@@ -22,7 +24,7 @@ def recommend_tasks(
         raise ValueError("存在不支持的活动分类")
 
     selected_category_set = set(selected_categories)
-    excluded = excluded_feedback_groups or set()
+    excluded = (excluded_feedback_groups or set()) | (history_excluded_groups or set())
     scores = profile.get("scores", {})
     preference_map = {
         category: float(scores.get(category, 0))
@@ -41,6 +43,7 @@ def recommend_tasks(
         usable,
         key=lambda task: (
             -preference_map.get(task.category, 0),
+            -history_score(task, history_weights),
             task.duration,
             task.budget,
             task.id,
@@ -105,6 +108,20 @@ def recommend_tasks(
             ),
         },
     }
+
+
+def history_score(task: Task, history_weights: dict[str, Any] | None) -> float:
+    if not history_weights:
+        return 0.0
+    score = 0.0
+    score += history_weights.get("category_boosts", {}).get(task.category, 0)
+    score += history_weights.get("group_boosts", {}).get(task.feedback_group, 0)
+    score -= history_weights.get("group_penalties", {}).get(task.feedback_group, 0)
+    preferred = history_weights.get("preferred_duration_minutes")
+    if preferred:
+        distance = abs(task.duration - preferred)
+        score += max(0, 0.12 - min(distance, 60) / 500)
+    return round(score, 4)
 
 
 def enrich_task_reason(
@@ -300,6 +317,8 @@ def build_recommendation(
     repository: TaskRepository,
     limit: int = 10,
     excluded_feedback_groups: set[str] | None = None,
+    history_weights: dict[str, Any] | None = None,
+    history_excluded_groups: set[str] | None = None,
 ) -> dict[str, Any]:
     """Run the complete Profile -> Task Repository -> Recommendation flow."""
     constraints = profile.get("constraints", {})
@@ -319,6 +338,8 @@ def build_recommendation(
         candidates=candidates,
         limit=limit,
         excluded_feedback_groups=excluded_feedback_groups,
+        history_weights=history_weights,
+        history_excluded_groups=history_excluded_groups,
     )
     result["candidate_count"] = len(candidates)
     result["constraints"] = constraints

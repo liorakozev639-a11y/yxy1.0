@@ -340,6 +340,7 @@ class MVPOrchestrator:
         plans,
         delivery,
         memory=None,
+        user_history=None,
     ):
         self.sessions = sessions
         self.questionnaire = questionnaire
@@ -348,18 +349,20 @@ class MVPOrchestrator:
         self.plans = plans
         self.delivery = delivery
         self.memory = memory
+        self.user_history = user_history
 
     def generate_plan(
         self,
         session_id: str,
         request: GeneratePlanRequest,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         profile = self._build_profile(session_id)
         profile_data = asdict(profile)
 
         constraints = profile.constraints
         selected_categories = list(constraints["categories"])
-        recommendation = self._recommend(profile_data, selected_categories)
+        recommendation = self._recommend(profile_data, selected_categories, user_id)
         if recommendation["missing_categories"]:
             raise HTTPException(
                 status_code=409,
@@ -442,7 +445,12 @@ class MVPOrchestrator:
             preferences=constraints,
         )
 
-    def _recommend(self, profile: dict[str, Any], categories: list[str]) -> dict[str, Any]:
+    def _recommend(
+        self,
+        profile: dict[str, Any],
+        categories: list[str],
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         constraints = profile["constraints"]
         candidates = self.tasks.search_tasks(
             session_id=profile["session_id"],
@@ -458,12 +466,24 @@ class MVPOrchestrator:
             if self.memory is not None
             else set()
         )
+        history_weights = (
+            self.user_history.preference_weights(user_id)
+            if self.user_history is not None
+            else None
+        )
+        history_excluded_groups = (
+            self.user_history.excluded_groups(user_id)
+            if self.user_history is not None
+            else set()
+        )
         result = recommend_tasks(
             profile,
             categories,
             candidates,
             limit=10,
             excluded_feedback_groups=excluded_groups,
+            history_weights=history_weights,
+            history_excluded_groups=history_excluded_groups,
         )
         result["candidate_count"] = len(candidates)
         result["constraints"] = constraints

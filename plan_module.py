@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -20,6 +21,9 @@ from recommendation_module import (
     calculate_match_score,
 )
 from task_repository import CATEGORIES, Task, TaskRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 def make_id(prefix: str) -> str:
@@ -90,6 +94,37 @@ def select_replacement_task(
         if matches:
             return sorted(matches, key=lambda task: (task.duration, task.budget, task.id))[0]
     return None
+
+
+def select_easier_replacement_task(
+    *,
+    candidates: list[Task],
+    category: str,
+    used_task_ids: set[str],
+    excluded_feedback_groups: set[str] | None = None,
+) -> Task | None:
+    excluded = excluded_feedback_groups or set()
+    available = [
+        task
+        for task in candidates
+        if task.status == "approved"
+        and task.category == category
+        and task.id not in used_task_ids
+        and task.feedback_group not in excluded
+    ]
+    outing_rank = {"home": 0, "nearby": 1, "city": 2}
+    company_rank = {"solo": 0, "both": 1, "group": 2}
+    return min(
+        available,
+        key=lambda task: (
+            task.duration,
+            task.budget,
+            outing_rank.get(task.outing, 3),
+            company_rank.get(task.company, 3),
+            task.id,
+        ),
+        default=None,
+    )
 
 
 def normalize_replacement_history(value: Any) -> list[str]:
@@ -185,6 +220,7 @@ class PlanManagementService:
         sessions: Any,
         orchestrator: Any,
         memory: Any | None = None,
+        user_history: Any | None = None,
     ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
@@ -192,6 +228,7 @@ class PlanManagementService:
         self.sessions = sessions
         self.orchestrator = orchestrator
         self.memory = memory
+        self.user_history = user_history
         self.tasks = TaskRepository()
         self.init_schema()
 
@@ -202,6 +239,12 @@ class PlanManagementService:
         if self.memory is None:
             return set()
         return self.memory.list_excluded_groups(session_id)
+
+    def _replacement_excluded_groups(self, session_id: str, user_id: str | None) -> set[str]:
+        excluded = self._excluded_groups(session_id)
+        if self.user_history is not None:
+            excluded |= self.user_history.excluded_groups(user_id)
+        return excluded
 
     def init_schema(self) -> None:
         with self._connect() as connection:
@@ -429,7 +472,7 @@ class PlanManagementService:
             saved["recommendation_memory"] = self.memory.summary(session_id)
         return saved
 
-    def replace_item(self, session_id: str, plan_id: str, item_id: str, expected_version: int, replacement_task_id: str | None = None) -> dict[str, Any]:
+    def replace_item(self, session_id: str, plan_id: str, item_id: str, expected_version: int, replacement_task_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)
         self._check_version(plan, expected_version)
         current = self._find_item(plan, item_id)
@@ -454,7 +497,7 @@ class PlanManagementService:
             outing=session.preferences.get("outing", "any"),
             company=session.preferences.get("company", "both"),
             preferred_task_id=replacement_task_id,
-            excluded_feedback_groups=self._excluded_groups(session_id),
+            excluded_feedback_groups=self._replacement_excluded_groups(session_id, user_id),
         )
         if candidate is None:
             raise HTTPException(
@@ -471,7 +514,65 @@ class PlanManagementService:
         saved = self._save_version(plan, items)
         if self.memory is not None:
             saved["recommendation_memory"] = self.memory.summary(session_id)
+        self._record_replacement_history(user_id, session_id, plan_id, item_id, saved, candidate.id)
         return saved
+
+    def replace_item_easier(
+        self,
+        session_id: str,
+        plan_id: str,
+        item_id: str,
+        expected_version: int,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        plan = self._require(session_id, plan_id)
+        self._check_version(plan, expected_version)
+        current = self._find_item(plan, item_id)
+        if current["kind"] != "task":
+            raise HTTPException(status_code=400, detail="只能替换任务项")
+        used_ids = {item["task_id"] for item in plan["items"] if item["task_id"]}
+        used_ids.update(normalize_replacement_history(current.get("replacement_history")))
+        candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+        candidate = select_easier_replacement_task(
+            candidates=candidates,
+            category=current["category"],
+            used_task_ids=used_ids,
+            excluded_feedback_groups=self._replacement_excluded_groups(session_id, user_id),
+        )
+        if candidate is None:
+            raise HTTPException(status_code=409, detail="该分类没有更轻松的可用任务")
+        start = self._parse_time(current["start_at"])
+        end = self._parse_time(current["end_at"])
+        self._ensure_slot(plan, start, end, item_id)
+        items = [dict(item) for item in plan["items"]]
+        for item in items:
+            if item["id"] == item_id:
+                item.update(build_replaced_item(item, candidate))
+        saved = self._save_version(plan, items)
+        if self.memory is not None:
+            saved["recommendation_memory"] = self.memory.summary(session_id)
+        self._record_replacement_history(user_id, session_id, plan_id, item_id, saved, candidate.id)
+        return saved
+
+    def _record_replacement_history(
+        self,
+        user_id: str | None,
+        session_id: str,
+        old_plan_id: str,
+        old_item_id: str,
+        saved: dict[str, Any],
+        replacement_task_id: str,
+    ) -> None:
+        if self.user_history is None or not user_id:
+            return
+        try:
+            replacement_item = next(
+                item for item in saved["items"] if item.get("task_id") == replacement_task_id
+            )
+            self.user_history.record_action(user_id, session_id, old_plan_id, old_item_id, "replaced_from")
+            self.user_history.record_action(user_id, session_id, saved["plan_id"], replacement_item["id"], "replaced_to")
+        except Exception:
+            logger.exception("用户历史替换记录失败，不影响计划替换")
 
     def add_custom_task(self, session_id: str, plan_id: str, expected_version: int, title: str, duration_minutes: int, category: str | None = None) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)
