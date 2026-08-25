@@ -217,6 +217,38 @@ class ExecutionService:
                 )
         return self._payload(plan_id, item, events)
 
+    def refresh_items(
+        self,
+        session_id: str,
+        plan_id: str,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Check every runnable task deadline for one plan.
+
+        ``check_deadline`` remains the only place that changes an expired
+        item, which keeps manual and batch deadline checks idempotent.
+        """
+        self.sessions.require_active(session_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT i.id
+                FROM plan_items AS i
+                JOIN plans AS p ON p.id = i.plan_id
+                WHERE p.id = %s
+                  AND p.session_id = %s
+                  AND p.status <> 'superseded'
+                  AND i.kind = 'task'
+                  AND i.status IN ('pending', 'active')
+                ORDER BY i.start_at, i.id
+                """,
+                (plan_id, session_id),
+            ).fetchall()
+        return [
+            self.check_deadline(session_id, plan_id, row[0], now=now)
+            for row in rows
+        ]
+
     def events(
         self,
         session_id: str,
