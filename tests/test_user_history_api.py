@@ -78,6 +78,33 @@ class UserHistoryApiTest(unittest.TestCase):
         self.assertEqual(response.json()["data"]["recommended_action"], "replace_easier")
         self.assertFalse(response.json()["data"]["can_start"])
 
+    def test_replace_easier_keeps_category_and_records_history(self) -> None:
+        user = self.client.post("/api/v1/users/anonymous", json={}).json()["data"]
+        session_id, plan_id, item_id = self._create_plan()
+        original_plan = self.client.get(
+            f"/api/v1/sessions/{session_id}/plan"
+        ).json()["data"]
+        original_item = next(item for item in original_plan["items"] if item["id"] == item_id)
+
+        response = self.client.post(
+            f"/api/v1/plans/{plan_id}/items/{item_id}/replace-easier",
+            json={"expected_version": 1, "user_id": user["user_id"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        replaced_plan = response.json()["data"]
+        replacement = next(
+            item for item in replaced_plan["items"] if item["replacement_history"]
+        )
+        self.assertEqual(replacement["category"], original_item["category"])
+        self.assertNotEqual(replacement["task_id"], original_item["task_id"])
+        self.assertIn(original_item["task_id"], replacement["replacement_history"])
+        self.assertIn(replacement["task_id"], replacement["replacement_history"])
+        self.assertEqual(
+            self.client.get(f"/api/v1/users/{user['user_id']}/history/summary").json()["data"]["replaced_count"],
+            1,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

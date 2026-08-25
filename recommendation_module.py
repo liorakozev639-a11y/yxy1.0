@@ -24,7 +24,8 @@ def recommend_tasks(
         raise ValueError("存在不支持的活动分类")
 
     selected_category_set = set(selected_categories)
-    excluded = (excluded_feedback_groups or set()) | (history_excluded_groups or set())
+    session_excluded = excluded_feedback_groups or set()
+    excluded = session_excluded | (history_excluded_groups or set())
     scores = profile.get("scores", {})
     preference_map = {
         category: float(scores.get(category, 0))
@@ -102,9 +103,9 @@ def recommend_tasks(
         "missing_categories": missing,
         "reasons": reasons,
         "recommendation_memory": {
-            "excluded_group_count": len(excluded),
+            "excluded_group_count": len(session_excluded),
             "excluded_task_count": sum(
-                task.feedback_group in excluded for task in candidates
+                task.feedback_group in session_excluded for task in candidates
             ),
         },
     }
