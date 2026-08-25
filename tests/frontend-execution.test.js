@@ -63,4 +63,13 @@ test('result view presents recommended times and execution controls', () => {
   assert.match(app, /needs_adjustment/);
   assert.match(app, /recommendationMemorySummary/);
   assert.match(app, /replacementReason/);
+  assert.match(app, /api\.refreshExecution/);
+  assert.match(app, /setInterval\(/);
+  assert.match(app, /clearInterval\(/);
+  assert.match(app, /async function initialize\(\)[\s\S]*?state\.busy = false;\s*render\(\);\s*syncExecutionRefresh\(\);/);
+  assert.match(app, /data-action="view-review"/);
+  assert.match(app, /data-action="save-reflection"/);
+  assert.match(app, /satisfied/);
+  assert.match(app, /neutral/);
+  assert.match(app, /dissatisfied/);
 });

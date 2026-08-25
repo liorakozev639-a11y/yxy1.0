@@ -43,9 +43,15 @@
     feedbackItemId: null,
     feedbackRating: null,
     feedbackReasons: [],
+    executionReminders: null,
+    review: null,
+    showingReview: false,
+    reflectionItemId: null,
+    reflectionSentiment: null,
   };
   const stepNumbers = { welcome: 1, profile: 2, mode: 3, quiz: 4, insight: 5, result: 6 };
   let toastTimer;
+  let executionRefreshTimer;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
@@ -260,6 +266,46 @@
     return reason ? `<div class="replacement-note timeline-replacement-note">${escapeHtml(reason)}</div>` : '';
   }
 
+  function executionReminder() {
+    const reminders = state.executionReminders || {};
+    if (reminders.needs_adjustment_count > 0) {
+      return `<div class="execution-reminder needs-adjustment" role="status">有 ${escapeHtml(reminders.needs_adjustment_count)} 项任务需要调整</div>`;
+    }
+    if (Array.isArray(reminders.ending_soon_titles) && reminders.ending_soon_titles.length) {
+      return `<div class="execution-reminder ending-soon" role="status">任务即将结束：${escapeHtml(reminders.ending_soon_titles[0])}</div>`;
+    }
+    if (Array.isArray(reminders.startable_titles) && reminders.startable_titles.length) {
+      return `<div class="execution-reminder startable" role="status">现在可以开始：${escapeHtml(reminders.startable_titles[0])}</div>`;
+    }
+    return '';
+  }
+
+  function reflectionControls(item) {
+    if (item.outcome !== 'completed') return '';
+    const selected = state.reflectionItemId === item.item_id
+      ? state.reflectionSentiment
+      : item.sentiment;
+    const labels = [
+      ['satisfied', '满意'],
+      ['neutral', '一般'],
+      ['dissatisfied', '不满意'],
+    ];
+    return `<div class="reflection-controls"><span>完成感受（可选）</span><div class="reflection-choices">${labels.map(([value, label]) => `<button class="reflection-choice ${selected === value ? 'is-selected' : ''}" data-action="choose-reflection" data-item-id="${escapeHtml(item.item_id)}" data-sentiment="${value}" ${state.busy ? 'disabled' : ''}>${label}</button>`).join('')}</div><button class="button primary compact" data-action="save-reflection" data-item-id="${escapeHtml(item.item_id)}" ${state.reflectionItemId === item.item_id && state.reflectionSentiment ? '' : 'disabled'}>保存感受</button></div>`;
+  }
+
+  function reviewPanel() {
+    const review = state.review;
+    if (!review) return '';
+    const summary = review.summary || {};
+    return `<section class="review-panel" aria-label="本次复盘">
+      <div class="pixel-section-label"><strong>本次复盘</strong><span>计划已结束</span></div>
+      <div class="review-summary"><span>完成 ${escapeHtml(summary.completed_count ?? 0)}</span><span>跳过 ${escapeHtml(summary.skipped_count ?? 0)}</span><span>未完成 ${escapeHtml(summary.unfinished_count ?? 0)}</span></div>
+      <div class="review-items">${(review.items || []).map((item) => `<article class="review-item outcome-${escapeHtml(item.outcome)}"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.outcome === 'completed' ? '已完成' : item.outcome === 'skipped' ? '已跳过' : '未完成')}</span></div>${reflectionControls(item)}</article>`).join('')}</div>
+      <div class="review-suggestions"><strong>下次建议</strong>${(review.suggestions || []).map((suggestion) => `<p>${escapeHtml(suggestion)}</p>`).join('')}</div>
+      <button class="button ghost" data-action="back-to-plan" ${state.busy ? 'disabled' : ''}>返回计划</button>
+    </section>`;
+  }
+
   function reasonModal(items) {
     const item = items.find((entry) => entry.id === state.detailItemId);
     if (!item) return '';
@@ -327,8 +373,9 @@
             <div class="result-stat"><span>已回答</span><strong>${result.answered_count ?? 0}</strong></div>
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
+          ${executionReminder()}
           ${memorySummary ? `<div class="recommendation-memory-note">${escapeHtml(memorySummary)}</div>` : ''}
-          <div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
+          ${state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
             <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
             <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}${replacementNote(item)}<div class="timeline-actions">
               ${executionActions(item, plan)}
@@ -336,7 +383,8 @@
               <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>调整时间</button>
               ${item.status === 'pending' || item.status === 'active' ? `<button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>编辑跳过</button>` : ''}
             </div>${feedbackPanel(item)}</div>
-          </article>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>
+          </article>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>`}
+          ${state.review && !state.showingReview ? '<button class="button secondary" data-action="view-review">查看本次复盘</button>' : ''}
           <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
           <div class="actions pixel-result-actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已按流程执行' : '按此流程执行'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
         </div>
@@ -369,6 +417,7 @@
   }
 
   function resetLocalState() {
+    stopExecutionRefresh();
     state.selectedCategories = [];
     state.profile = defaultProfile();
     state.mode = null;
@@ -383,6 +432,11 @@
     state.detailItemId = null;
     state.feedbackRating = null;
     state.feedbackReasons = [];
+    state.executionReminders = null;
+    state.review = null;
+    state.showingReview = false;
+    state.reflectionItemId = null;
+    state.reflectionSentiment = null;
   }
 
   function buildPreferences() {
@@ -455,6 +509,7 @@
     } finally {
       state.busy = false;
       render();
+      syncExecutionRefresh();
     }
   }
 
@@ -531,6 +586,7 @@
     } finally {
       state.busy = false;
       render();
+      syncExecutionRefresh();
     }
   }
 
@@ -545,6 +601,51 @@
           : item
       )),
     };
+  }
+
+  function mergeRefreshedItems(items) {
+    if (!state.plan || !Array.isArray(items)) return;
+    const refreshedById = new Map(items.map((item) => [item.item_id, item]));
+    state.plan = {
+      ...state.plan,
+      items: state.plan.items.map((item) => {
+        const refreshed = refreshedById.get(item.id);
+        return refreshed ? { ...item, ...refreshed, id: item.id } : item;
+      }),
+    };
+  }
+
+  async function refreshExecutionState() {
+    if (state.step !== 'result' || !state.plan?.plan_id || state.busy) return;
+    try {
+      const refreshed = await api.refreshExecution(state.plan.plan_id);
+      mergeRefreshedItems(refreshed.items);
+      state.executionReminders = refreshed.reminders || null;
+      const review = await api.getReview(state.plan.plan_id);
+      if (review.status === 'finished') state.review = review;
+      render();
+    } catch (_) {
+      showToast('执行状态暂时无法刷新');
+    }
+  }
+
+  function stopExecutionRefresh() {
+    if (executionRefreshTimer) {
+      clearInterval(executionRefreshTimer);
+      executionRefreshTimer = null;
+    }
+  }
+
+  function syncExecutionRefresh() {
+    if (state.step !== 'result' || !state.plan?.plan_id) {
+      stopExecutionRefresh();
+      return;
+    }
+    if (executionRefreshTimer) return;
+    void refreshExecutionState();
+    executionRefreshTimer = setInterval(() => {
+      void refreshExecutionState();
+    }, 30000);
   }
 
   async function generateCurrentPlan() {
@@ -651,6 +752,36 @@
       state.feedbackRating = null;
       state.feedbackReasons = [];
       render();
+      return;
+    }
+    if (action === 'view-review') {
+      state.showingReview = true;
+      render();
+      return;
+    }
+    if (action === 'back-to-plan') {
+      state.showingReview = false;
+      render();
+      return;
+    }
+    if (action === 'choose-reflection') {
+      state.reflectionItemId = control.dataset.itemId;
+      state.reflectionSentiment = control.dataset.sentiment;
+      render();
+      return;
+    }
+    if (action === 'save-reflection') {
+      const plan = state.plan;
+      if (!plan || !state.reflectionItemId || !state.reflectionSentiment) return;
+      await runTask(async () => {
+        await api.saveReflection(plan.plan_id, state.reflectionItemId, {
+          sentiment: state.reflectionSentiment,
+        });
+        state.review = await api.getReview(plan.plan_id);
+        state.reflectionItemId = null;
+        state.reflectionSentiment = null;
+        showToast('完成感受已保存');
+      });
       return;
     }
     if (action === 'open-detail') {

@@ -60,3 +60,15 @@ test('task detail dialog exposes score, preference matches, warnings, and replac
   assert.match(css, /\.matched-preferences/);
   assert.match(css, /\.replacement-note/);
 });
+
+test('execution review keeps pixel reminder and reflection controls', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /execution-reminder/);
+  assert.match(app, /review-panel/);
+  assert.match(app, /reflection-choice/);
+  assert.match(css, /\.execution-reminder/);
+  assert.match(css, /\.review-panel/);
+  assert.match(css, /\.reflection-choice/);
+});
