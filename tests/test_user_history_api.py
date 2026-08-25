@@ -4,6 +4,7 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 
+import psycopg
 from fastapi.testclient import TestClient
 
 from main import create_app
@@ -104,6 +105,16 @@ class UserHistoryApiTest(unittest.TestCase):
             self.client.get(f"/api/v1/users/{user['user_id']}/history/summary").json()["data"]["replaced_count"],
             1,
         )
+        with psycopg.connect(os.environ["SESSION_DATABASE_URL"]) as connection:
+            history_actions = connection.execute(
+                """
+                SELECT action
+                FROM user_task_history
+                WHERE user_id = %s AND plan_id = %s
+                """,
+                (user["user_id"], replaced_plan["plan_id"]),
+            ).fetchall()
+        self.assertIn(("replaced_to",), history_actions)
 
 
 if __name__ == "__main__":
