@@ -209,6 +209,23 @@
       return executionRequest(planId, itemId, 'check-deadline', input);
     }
 
+    function refreshExecution(planId) {
+      return request(`/api/v1/plans/${planId}/execution/refresh`, {
+        method: 'POST',
+      });
+    }
+
+    function saveReflection(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/reflection`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function getReview(planId) {
+      return request(`/api/v1/plans/${planId}/review`);
+    }
+
     function saveFeedback(planId, itemId, input) {
       return request(`/api/v1/plans/${planId}/items/${itemId}/feedback`, {
         method: 'POST',
@@ -242,6 +259,7 @@
       createSession,
       forgetSession,
       getFeedback,
+      getReview,
       getProgress,
       getPlan,
       getProfileInsight,
@@ -250,9 +268,11 @@
       restoreSession,
       replacePlanItem,
       replan,
+      refreshExecution,
       saveFeedback,
       saveAnswer,
       savePreferences,
+      saveReflection,
       skipExecution,
       skipQuestion,
       skipPlanItem,

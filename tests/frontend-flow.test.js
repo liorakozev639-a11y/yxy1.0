@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   firstUnansweredIndex,
   recoverInitialization,
+  recommendationMemorySummary,
   taskReasonSummary,
   resumeDestination,
 } = require('../frontend/flow.js');
@@ -85,4 +86,10 @@ test('taskReasonSummary falls back when backend reason fields are missing', () =
 
   assert.deepEqual(summary.tags, ['覆盖松弛疗愈']);
   assert.equal(summary.text, '该任务覆盖「松弛疗愈」，并已进入当前计划。');
+});
+
+test('recommendationMemorySummary gives users a readable exclusion count', () => {
+  assert.equal(recommendationMemorySummary({ excluded_group_count: 2 }), '已为你避开 2 组不喜欢的任务');
+  assert.equal(recommendationMemorySummary({ excluded_group_count: 0 }), '');
+  assert.equal(recommendationMemorySummary(null), '');
 });

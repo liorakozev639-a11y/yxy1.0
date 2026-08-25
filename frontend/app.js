@@ -255,6 +255,11 @@
     return `<div class="reason-tags">${summary.tags.slice(0, 5).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>`;
   }
 
+  function replacementNote(item) {
+    const reason = flow.taskReasonSummary(item).replacementReason;
+    return reason ? `<div class="replacement-note timeline-replacement-note">${escapeHtml(reason)}</div>` : '';
+  }
+
   function reasonModal(items) {
     const item = items.find((entry) => entry.id === state.detailItemId);
     if (!item) return '';
@@ -299,6 +304,7 @@
     const result = state.result || {};
     const plan = state.plan || {};
     const items = Array.isArray(plan.items) ? plan.items : [];
+    const memorySummary = flow.recommendationMemorySummary(plan.recommendation_memory);
     const formatTime = (value) => {
       if (!value) return '--:--';
       return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -321,9 +327,10 @@
             <div class="result-stat"><span>已回答</span><strong>${result.answered_count ?? 0}</strong></div>
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
+          ${memorySummary ? `<div class="recommendation-memory-note">${escapeHtml(memorySummary)}</div>` : ''}
           <div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
             <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
-            <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}<div class="timeline-actions">
+            <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}${replacementNote(item)}<div class="timeline-actions">
               ${executionActions(item, plan)}
               <button class="button ghost compact" data-action="open-detail" data-item-id="${escapeHtml(item.id)}">详情</button>
               <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>调整时间</button>
@@ -531,6 +538,7 @@
     if (!state.plan || !payload || !payload.item) return;
     state.plan = {
       ...state.plan,
+      ...(payload.recommendation_memory ? { recommendation_memory: payload.recommendation_memory } : {}),
       items: state.plan.items.map((item) => (
         item.id === payload.item.id
           ? { ...item, status: payload.item.status }
@@ -672,10 +680,16 @@
       const plan = state.plan;
       if (!plan || !state.feedbackItemId || !state.feedbackRating) return;
       await runTask(async () => {
-        await api.saveFeedback(plan.plan_id, state.feedbackItemId, {
+        const feedback = await api.saveFeedback(plan.plan_id, state.feedbackItemId, {
           rating: state.feedbackRating,
           reasons: state.feedbackReasons,
         });
+        if (feedback.recommendation_memory) {
+          state.plan = {
+            ...state.plan,
+            recommendation_memory: feedback.recommendation_memory,
+          };
+        }
         state.feedbackItemId = null;
         state.feedbackRating = null;
         state.feedbackReasons = [];
@@ -707,6 +721,9 @@
         state.plan = await api.replacePlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
         });
+        const item = state.plan.items.find((entry) => entry.id === control.dataset.itemId);
+        const reason = flow.taskReasonSummary(item).replacementReason;
+        showToast(reason || '已更换任务');
       });
       return;
     }

@@ -59,8 +59,15 @@
     };
   }
 
+  function recommendationMemorySummary(memory) {
+    const count = Number(memory && memory.excluded_group_count);
+    if (!Number.isInteger(count) || count <= 0) return '';
+    return `已为你避开 ${count} 组不喜欢的任务`;
+  }
+
   return {
     firstUnansweredIndex,
+    recommendationMemorySummary,
     recoverInitialization,
     resumeDestination,
     taskReasonSummary,

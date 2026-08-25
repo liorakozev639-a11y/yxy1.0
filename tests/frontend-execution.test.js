@@ -35,6 +35,9 @@ test('execution API methods use phase two routes', async () => {
   await api.skipExecution('plan_1', 'item_1');
   await api.checkExecutionDeadline('plan_1', 'item_1');
   await api.saveFeedback('plan_1', 'item_1', { rating: 5, reasons: ['容易开始'] });
+  await api.refreshExecution('plan_1');
+  await api.saveReflection('plan_1', 'item_1', { sentiment: 'neutral' });
+  await api.getReview('plan_1');
 
   assert.deepEqual(calls.map(({ url, options }) => [url, options.method]), [
     ['http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/execution/start', 'POST'],
@@ -42,6 +45,9 @@ test('execution API methods use phase two routes', async () => {
     ['http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/execution/skip', 'POST'],
     ['http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/execution/check-deadline', 'POST'],
     ['http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/feedback', 'POST'],
+    ['http://127.0.0.1:8000/api/v1/plans/plan_1/execution/refresh', 'POST'],
+    ['http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/reflection', 'POST'],
+    ['http://127.0.0.1:8000/api/v1/plans/plan_1/review', 'GET'],
   ]);
 });
 
@@ -55,4 +61,6 @@ test('result view presents recommended times and execution controls', () => {
   assert.match(app, /data-action="skip-execution"/);
   assert.match(app, /data-action="save-feedback"/);
   assert.match(app, /needs_adjustment/);
+  assert.match(app, /recommendationMemorySummary/);
+  assert.match(app, /replacementReason/);
 });
