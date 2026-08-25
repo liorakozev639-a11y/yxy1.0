@@ -22,6 +22,7 @@ from questionnaire_module import (
 from delivery_module import PostgreSQLDeliveryRepository, WebDeliveryService
 from execution_service import ExecutionService
 from feedback_service import FeedbackService
+from review_service import ReviewService
 from mvp_orchestrator import (
     GeneratePlanRequest,
     MVPOrchestrator,
@@ -108,6 +109,10 @@ class FeedbackInput(BaseModel):
     reasons: list[str] = Field(default_factory=list, max_length=3)
 
 
+class ReflectionInput(BaseModel):
+    sentiment: Literal["satisfied", "neutral", "dissatisfied"]
+
+
 def success(data: Any) -> dict[str, Any]:
     """
 
@@ -170,6 +175,7 @@ def create_app(
     plan_service: Optional[PlanManagementService] = None,
     execution_service: Optional[ExecutionService] = None,
     feedback_service: Optional[FeedbackService] = None,
+    review_service: Optional[ReviewService] = None,
     memory: Optional[RecommendationMemory] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
@@ -223,6 +229,17 @@ def create_app(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
             memory=memory,
+        )
+    if (
+        review_service is None
+        and os.getenv("SESSION_DATABASE_URL")
+        and isinstance(session_service, SessionService)
+        and execution_service is not None
+    ):
+        review_service = ReviewService(
+            os.environ["SESSION_DATABASE_URL"],
+            session_service,
+            execution_service,
         )
 
     app = FastAPI(
@@ -405,6 +422,11 @@ def create_app(
             raise HTTPException(status_code=503, detail="反馈服务未配置")
         return feedback_service
 
+    def require_review_service() -> ReviewService:
+        if review_service is None:
+            raise HTTPException(status_code=503, detail="计划复盘服务未配置")
+        return review_service
+
     @app.patch("/api/v1/plans/{plan_id}/items/{item_id}")
     def edit_plan_item(
         plan_id: str,
@@ -548,6 +570,38 @@ def create_app(
         service = require_execution_service()
         session_id = _session_id_from_plan(manager, plan_id)
         return success(service.events(session_id, plan_id, item_id))
+
+    @app.post("/api/v1/plans/{plan_id}/execution/refresh")
+    def refresh_plan_execution(plan_id: str) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_review_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(service.refresh_plan(session_id, plan_id))
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/reflection")
+    def save_reflection(
+        plan_id: str,
+        item_id: str,
+        body: ReflectionInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_review_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            service.save_reflection(
+                session_id,
+                plan_id,
+                item_id,
+                body.sentiment,
+            )
+        )
+
+    @app.get("/api/v1/plans/{plan_id}/review")
+    def get_plan_review(plan_id: str) -> dict[str, Any]:
+        manager = require_plan_service()
+        service = require_review_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(service.get_review(session_id, plan_id))
 
     @app.post("/api/v1/plans/{plan_id}/items/{item_id}/feedback")
     def save_feedback(
