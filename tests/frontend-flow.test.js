@@ -69,6 +69,12 @@ test('taskReasonSummary normalizes card tags and detail text', () => {
     matched_preferences: ['分类偏好强', '居家可做'],
     warning_text: '预算略高，请确认是否接受。',
     replacement_reason: '已避开你之前看过的任务。',
+    load_profile: {
+      ease_label: '很轻松',
+      physical_label: '低体力',
+      social_label: '低社交压力',
+      location_label: '居家',
+    },
   };
 
   const summary = taskReasonSummary(item);
@@ -79,6 +85,12 @@ test('taskReasonSummary normalizes card tags and detail text', () => {
   assert.deepEqual(summary.matchedPreferences, ['分类偏好强', '居家可做']);
   assert.equal(summary.warningText, '预算略高，请确认是否接受。');
   assert.equal(summary.replacementReason, '已避开你之前看过的任务。');
+  assert.deepEqual(summary.loadProfile, {
+    ease: '很轻松',
+    physical: '低体力',
+    social: '低社交压力',
+    location: '居家',
+  });
 });
 
 test('taskReasonSummary falls back when backend reason fields are missing', () => {
@@ -86,6 +98,7 @@ test('taskReasonSummary falls back when backend reason fields are missing', () =
 
   assert.deepEqual(summary.tags, ['覆盖松弛疗愈']);
   assert.equal(summary.text, '该任务覆盖「松弛疗愈」，并已进入当前计划。');
+  assert.deepEqual(summary.loadProfile, null);
 });
 
 test('recommendationMemorySummary gives users a readable exclusion count', () => {

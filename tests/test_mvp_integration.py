@@ -109,7 +109,7 @@ class FakeOrchestrator:
             "suggestions": [],
         }
 
-    def generate_plan(self, session_id, request):
+    def generate_plan(self, session_id, request, user_id=None):
         return {
             "profile": {"session_id": session_id},
             "recommendation": {"covered_categories": []},
@@ -154,6 +154,32 @@ class MVPIntegrationTests(unittest.TestCase):
             )
         )
         self.assertEqual(result["recommendation_memory"]["excluded_group_count"], 1)
+
+    def test_questionnaire_recommendation_returns_ten_tasks(self):
+        orchestrator = MVPOrchestrator(
+            sessions=FakeSessionService({}),
+            questionnaire=None,
+            tasks=TaskRepository(),
+            profiles=None,
+            plans=None,
+            delivery=None,
+        )
+        profile = {
+            "session_id": "sess_integration",
+            "scores": {category: 1.0 for category in CATEGORIES},
+            "constraints": {
+                "budget_limit": 80,
+                "max_duration": 270,
+                "outing": "any",
+                "company": "both",
+                "scenarios": None,
+            },
+        }
+
+        result = orchestrator._recommend(profile, list(CATEGORIES))
+
+        self.assertEqual(len(result["tasks"]), 10)
+        self.assertEqual(len(result["task_ids"]), 10)
 
     def test_group_nearby_medium_tasks_cover_selected_categories(self):
         selected_categories = ["松弛疗愈", "社交连接", "乐享探索"]

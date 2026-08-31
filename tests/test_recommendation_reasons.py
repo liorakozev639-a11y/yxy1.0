@@ -116,6 +116,56 @@ class RecommendationReasonTests(unittest.TestCase):
         self.assertIn("预算高于当前档位", task["warning_text"])
         self.assertIn("时长超过当前偏好", task["warning_text"])
 
+    def test_rest_only_recommendation_prioritizes_lighter_tasks(self) -> None:
+        tasks = [
+            Task(
+                id="task_hard_training",
+                title="高强度训练",
+                category="活力充电",
+                duration=20,
+                budget=0,
+                outing="home",
+                company="solo",
+                ease_level=1,
+                physical_load=5,
+                social_pressure=1,
+                location_dependency="home",
+            ),
+            Task(
+                id="task_soft_stretch",
+                title="温和拉伸",
+                category="活力充电",
+                duration=25,
+                budget=0,
+                outing="home",
+                company="solo",
+                ease_level=5,
+                physical_load=1,
+                social_pressure=1,
+                location_dependency="home",
+            ),
+        ]
+        profile = {
+            "scores": {"活力充电": 0.8},
+            "constraints": {
+                "outing": "home",
+                "company": "solo",
+                "budget_limit": 20,
+                "max_duration": 30,
+                "rest_only": True,
+            },
+        }
+
+        result = recommend_tasks(profile, ["活力充电"], tasks, limit=1)
+
+        [task] = result["tasks"]
+        self.assertEqual(task["id"], "task_soft_stretch")
+        self.assertEqual(task["load_profile"]["ease_label"], "很轻松")
+        self.assertIn("轻松度高", task["reason_tags"])
+        self.assertIn("体力消耗低", task["reason_tags"])
+        self.assertIn("轻松度较高", task["matched_preferences"])
+        self.assertIn("体力消耗较低", task["reason_text"])
+
 
 if __name__ == "__main__":
     unittest.main()

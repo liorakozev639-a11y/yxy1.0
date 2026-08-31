@@ -13,14 +13,16 @@ test('formal frontend exposes the pixel visual shell', () => {
 
   assert.match(index, /class="site-header pixel-header"/);
   assert.match(index, /class="app-shell pixel-app-shell"/);
-  assert.match(index, /styles\.css\?v=pixel-v3/);
-  assert.match(index, /api\.js\?v=pixel-v3/);
-  assert.match(index, /flow\.js\?v=pixel-v3/);
-  assert.match(index, /app\.js\?v=pixel-v3/);
+  assert.match(index, /styles\.css\?v=pixel-v4/);
+  assert.match(index, /api\.js\?v=pixel-v4/);
+  assert.match(index, /flow\.js\?v=pixel-v4/);
+  assert.match(index, /app\.js\?v=pixel-v4/);
   assert.match(app, /class="screen pixel-screen/);
   assert.match(app, /pixel-plan-layout/);
   assert.match(app, /pixel-plan-hero/);
   assert.match(app, /pixel-companion-panel/);
+  assert.match(app, /recommended-task-list/);
+  assert.match(app, /recommendedTasks\.length/);
   assert.match(css, /--pixel-paper/);
   assert.match(css, /image-rendering:\s*pixelated/);
   assert.match(css, /\.pixel-plan-layout/);
@@ -44,21 +46,25 @@ test('formal frontend shows profile insight before generating the plan', () => {
 
   assert.match(app, /renderInsight/);
   assert.match(app, /你的空闲偏好画像/);
+  assert.match(app, /为什么推荐这些任务/);
+  assert.match(app, /画像会影响任务推荐/);
   assert.match(app, /data-action="generate-plan"/);
   assert.match(css, /\.profile-insight-grid/);
   assert.match(css, /\.profile-insight-card/);
+  assert.match(css, /\.recommendation-basis/);
 });
 
-test('task detail dialog exposes score, preference matches, warnings, and replacement note', () => {
+test('task detail dialog exposes score, preference matches, load profile, and warnings', () => {
   const app = read('app.js');
   const css = read('styles.css');
 
   assert.match(app, /reason-score-row/);
   assert.match(app, /matchedPreferences/);
+  assert.match(app, /loadProfile/);
+  assert.match(app, /任务轻重/);
   assert.match(app, /warningText/);
-  assert.match(app, /replacementReason/);
   assert.match(css, /\.matched-preferences/);
-  assert.match(css, /\.replacement-note/);
+  assert.match(css, /\.load-profile-grid/);
 });
 
 test('execution review keeps pixel reminder and reflection controls', () => {

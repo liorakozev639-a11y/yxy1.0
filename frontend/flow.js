@@ -41,6 +41,13 @@
 
   function taskReasonSummary(item) {
     const category = item && item.category ? item.category : '当前分类';
+    const profile = item && item.load_profile;
+    const loadProfile = profile ? {
+      ease: profile.ease_label || '',
+      physical: profile.physical_label || '',
+      social: profile.social_label || '',
+      location: profile.location_label || '',
+    } : null;
     return {
       tags: Array.isArray(item && item.reason_tags) && item.reason_tags.length > 0
         ? item.reason_tags
@@ -54,6 +61,7 @@
       matchedPreferences: Array.isArray(item && item.matched_preferences)
         ? item.matched_preferences
         : [],
+      loadProfile,
       warningText: item && item.warning_text ? item.warning_text : '',
       replacementReason: item && item.replacement_reason ? item.replacement_reason : '',
     };

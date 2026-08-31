@@ -45,6 +45,7 @@ def recommend_tasks(
         key=lambda task: (
             -preference_map.get(task.category, 0),
             -history_score(task, history_weights),
+            -load_fit_score(task, profile.get("constraints", {})),
             task.duration,
             task.budget,
             task.id,
@@ -92,6 +93,7 @@ def recommend_tasks(
             "match_score": task["match_score"],
             "matched_preferences": task["matched_preferences"],
             "warning_text": task["warning_text"],
+            "load_profile": task["load_profile"],
         }
         for task in enriched_tasks
     ]
@@ -125,6 +127,65 @@ def history_score(task: Task, history_weights: dict[str, Any] | None) -> float:
     return round(score, 4)
 
 
+def load_fit_score(task: Task, constraints: dict[str, Any] | None = None) -> float:
+    constraints = constraints or {}
+    score = 0.0
+    if constraints.get("rest_only"):
+        score += task.ease_level * 0.08
+        score += (6 - task.physical_load) * 0.08
+        score += (6 - task.social_pressure) * 0.04
+
+    company = constraints.get("company")
+    if company == "solo":
+        score += (6 - task.social_pressure) * 0.04
+    elif company == "group":
+        score += max(0, task.social_pressure - 2) * 0.03
+
+    outing = constraints.get("outing")
+    if outing == "home" and task.location_dependency in {"home", "flexible"}:
+        score += 0.08
+    elif outing == "nearby" and task.location_dependency in {"home", "nearby", "flexible"}:
+        score += 0.06
+    elif outing in {"city", "any"}:
+        score += 0.03
+    return round(score, 4)
+
+
+def build_load_profile(task: Task) -> dict[str, Any]:
+    ease_label = (
+        "很轻松" if task.ease_level >= 5
+        else "较轻松" if task.ease_level >= 4
+        else "适中" if task.ease_level >= 3
+        else "有挑战"
+    )
+    physical_label = (
+        "低体力" if task.physical_load <= 2
+        else "中体力" if task.physical_load <= 3
+        else "高体力"
+    )
+    social_label = (
+        "低社交压力" if task.social_pressure <= 2
+        else "中社交压力" if task.social_pressure <= 3
+        else "高社交压力"
+    )
+    location_label = {
+        "home": "居家",
+        "nearby": "附近",
+        "city": "全城",
+        "flexible": "地点灵活",
+    }.get(task.location_dependency, "地点灵活")
+    return {
+        "ease_level": task.ease_level,
+        "ease_label": ease_label,
+        "physical_load": task.physical_load,
+        "physical_label": physical_label,
+        "social_pressure": task.social_pressure,
+        "social_label": social_label,
+        "location_dependency": task.location_dependency,
+        "location_label": location_label,
+    }
+
+
 def enrich_task_reason(
     task: Task,
     constraints: dict[str, Any] | None = None,
@@ -132,6 +193,7 @@ def enrich_task_reason(
     slot_minutes: int | None = None,
 ) -> dict[str, Any]:
     payload = asdict(task)
+    payload["load_profile"] = build_load_profile(task)
     payload["reason_tags"] = build_reason_tags(task, constraints, slot_minutes)
     payload["matched_preferences"] = build_matched_preferences(
         task,
@@ -215,6 +277,14 @@ def build_matched_preferences(
         matches.append("时长匹配")
     if constraints.get("rest_only"):
         matches.append("低压力优先")
+        if task.ease_level >= 4:
+            matches.append("轻松度较高")
+        if task.physical_load <= 2:
+            matches.append("体力负担低")
+    if company == "solo" and task.social_pressure <= 2:
+        matches.append("社交压力低")
+    if task.location_dependency == "flexible":
+        matches.append("地点灵活")
     return matches
 
 
@@ -236,6 +306,12 @@ def build_warning_text(
     company = constraints.get("company")
     if company and company != "both" and task.company not in {company, "both"}:
         warnings.append("同行方式可能不完全匹配")
+    if constraints.get("rest_only") and task.physical_load >= 4:
+        warnings.append("体力消耗可能偏高")
+    if company == "solo" and task.social_pressure >= 4:
+        warnings.append("社交压力可能偏高")
+    if outing == "home" and task.location_dependency not in {"home", "flexible"}:
+        warnings.append("地点依赖不适合居家")
     if not warnings:
         return ""
     return "；".join(warnings) + "，请确认是否接受。"
@@ -276,6 +352,18 @@ def build_reason_tags(
 
     if constraints.get("rest_only"):
         tags.append("低压力友好")
+    if task.ease_level >= 4:
+        tags.append("轻松度高")
+    if task.physical_load <= 2:
+        tags.append("体力消耗低")
+    elif task.physical_load >= 4:
+        tags.append("体力消耗高")
+    if task.social_pressure <= 2:
+        tags.append("低社交压力")
+    elif task.social_pressure >= 4:
+        tags.append("社交压力高")
+    if task.location_dependency == "flexible":
+        tags.append("地点灵活")
     tags.append(f"覆盖{task.category}")
     return tags
 
@@ -308,6 +396,16 @@ def build_reason_text(
 
     lines.append(f"当前时间段约 {active_minutes} 分钟，系统会按这个时间段展示可执行版本。")
     lines.append(f"预计预算约为 {task.budget} 元，便于控制休闲成本。")
+    load_profile = build_load_profile(task)
+    lines.append(
+        "任务轻重："
+        f"{load_profile['ease_label']}、"
+        f"{load_profile['physical_label']}、"
+        f"{load_profile['social_label']}、"
+        f"{load_profile['location_label']}。"
+    )
+    if constraints.get("rest_only"):
+        lines.append("你当前偏恢复，系统会优先选择轻松度较高、体力消耗较低的任务。")
     return "\n".join(lines)
 
 

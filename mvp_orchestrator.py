@@ -32,6 +32,8 @@ CATEGORY_ALIASES = {
     "growth": "自我成长",
 }
 
+RECOMMENDATION_TASK_LIMIT = 10
+
 
 def make_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex}"
@@ -480,12 +482,13 @@ class MVPOrchestrator:
             profile,
             categories,
             candidates,
-            limit=10,
+            limit=RECOMMENDATION_TASK_LIMIT,
             excluded_feedback_groups=excluded_groups,
             history_weights=history_weights,
             history_excluded_groups=history_excluded_groups,
         )
         result["candidate_count"] = len(candidates)
+        result["recommended_task_count"] = len(result["tasks"])
         result["constraints"] = constraints
         return result
 

@@ -27,6 +27,7 @@
   const state = {
     step: 'booting',
     sessionId: null,
+    userId: null,
     selectedCategories: [],
     profile: defaultProfile(),
     mode: null,
@@ -35,6 +36,7 @@
     answers: {},
     currentIndex: 0,
     result: null,
+    recommendation: null,
     profileInsight: null,
     busy: false,
     error: '',
@@ -48,6 +50,9 @@
     showingReview: false,
     reflectionItemId: null,
     reflectionSentiment: null,
+    energyItemId: null,
+    energyChoice: null,
+    energyReplacementSuggested: false,
   };
   const stepNumbers = { welcome: 1, profile: 2, mode: 3, quiz: 4, insight: 5, result: 6 };
   let toastTimer;
@@ -225,6 +230,19 @@
           </div>`).join('')}</div>
         </aside>
       </div>
+      <div class="profile-insight-card recommendation-basis">
+        <span class="eyebrow">为什么推荐这些任务</span>
+        <div class="basis-grid">
+          <div>
+            <strong>画像会影响任务推荐</strong>
+            <p>系统会优先选择你得分更高的休闲方向，再结合预算、出行范围、独处或结伴偏好，过滤掉不适合当前状态的任务。</p>
+          </div>
+          <div>
+            <strong>计划会保留一点弹性</strong>
+            <p>如果某个方向得分较低，但你在第一步选择了它，系统仍会保留少量相关任务，避免计划只偏向单一类型。</p>
+          </div>
+        </div>
+      </div>
       <div class="profile-insight-card suggestion-panel">
         <span class="eyebrow">生成计划前的建议</span>
         <div class="suggestion-list">${suggestions.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>
@@ -261,9 +279,18 @@
     return `<div class="reason-tags">${summary.tags.slice(0, 5).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>`;
   }
 
-  function replacementNote(item) {
-    const reason = flow.taskReasonSummary(item).replacementReason;
-    return reason ? `<div class="replacement-note timeline-replacement-note">${escapeHtml(reason)}</div>` : '';
+  function loadProfile(summary) {
+    if (!summary.loadProfile) return '';
+    const items = [
+      ['轻松度', summary.loadProfile.ease],
+      ['体力消耗', summary.loadProfile.physical],
+      ['社交压力', summary.loadProfile.social],
+      ['地点依赖', summary.loadProfile.location],
+    ];
+    return `<section class="load-profile-grid" aria-label="任务轻重">
+      <strong>任务轻重</strong>
+      <div>${items.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value || '--')}</b></span>`).join('')}</div>
+    </section>`;
   }
 
   function executionReminder() {
@@ -321,18 +348,27 @@
           <span>匹配分</span>
           <strong>${summary.matchScore === null ? '--' : Math.round(summary.matchScore * 100)}</strong>
         </div>
+        ${loadProfile(summary)}
         ${summary.matchedPreferences.length ? `<div class="matched-preferences">${summary.matchedPreferences.map((entry) => `<span>${escapeHtml(entry)}</span>`).join('')}</div>` : ''}
         ${summary.warningText ? `<div class="warning-note">${escapeHtml(summary.warningText)}</div>` : ''}
-        ${summary.replacementReason ? `<div class="replacement-note">${escapeHtml(summary.replacementReason)}</div>` : ''}
         <div class="reason-text">${escapeHtml(summary.text).replace(/\n/g, '<br>')}</div>
       </article>
     </div>`;
   }
 
+  function energyPanel(item) {
+    if (state.energyItemId !== item.id) return '';
+    const disabled = state.busy ? 'disabled' : '';
+    if (state.energyReplacementSuggested) {
+      return `<div class="energy-panel"><strong>现在先换成更轻松的任务吧</strong><p>低精力时，我们会为这项任务找一个更容易开始的替代方案。</p><button class="button primary compact" data-action="replace-easier" ${disabled}>换个更轻松的</button></div>`;
+    }
+    return `<div class="energy-panel"><strong>开始前，确认一下现在的精力</strong><div class="energy-options">${[['high', '精力充足'], ['medium', '还可以'], ['low', '有点累']].map(([energy, label]) => `<button class="button secondary compact energy-option ${state.energyChoice === energy ? 'is-selected' : ''}" data-action="choose-energy" data-energy="${energy}" ${disabled}>${label}</button>`).join('')}</div><button class="button primary compact" data-action="confirm-energy-start" ${!state.energyChoice || state.busy ? 'disabled' : ''}>确认并开始</button></div>`;
+  }
+
   function executionActions(item, plan) {
     const disabled = state.busy ? 'disabled' : '';
     if (item.status === 'pending') {
-      return `<button class="button primary compact" data-action="start-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>开始任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>`;
+      return `<button class="button primary compact" data-action="start-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>开始任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>${energyPanel(item)}`;
     }
     if (item.status === 'active') {
       return `<button class="button primary compact" data-action="complete-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>完成任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>`;
@@ -350,7 +386,9 @@
     const result = state.result || {};
     const plan = state.plan || {};
     const items = Array.isArray(plan.items) ? plan.items : [];
-    const memorySummary = flow.recommendationMemorySummary(plan.recommendation_memory);
+    const recommendedTasks = state.recommendation && Array.isArray(state.recommendation.tasks)
+      ? state.recommendation.tasks
+      : [];
     const formatTime = (value) => {
       if (!value) return '--:--';
       return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -374,10 +412,10 @@
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
           ${executionReminder()}
-          ${memorySummary ? `<div class="recommendation-memory-note">${escapeHtml(memorySummary)}</div>` : ''}
+          ${recommendedTasks.length > 0 ? `<section class="recommended-task-list"><div class="pixel-section-label"><strong>本次推荐任务</strong><span>${recommendedTasks.length} 个</span></div><p class="recommended-task-note">这些任务来自你的问卷偏好；时间线会优先安排当前空闲时段能够放下的任务。</p><div class="recommended-task-grid">${recommendedTasks.map((task, index) => `<article class="recommended-task"><span class="recommended-task-index">${String(index + 1).padStart(2, '0')}</span><div><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.category)} · ${escapeHtml(task.duration)} 分钟 · ${escapeHtml(task.budget)} 元以内</span></div></article>`).join('')}</div></section>` : ''}
           ${state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
             <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
-            <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}${replacementNote(item)}<div class="timeline-actions">
+            <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}<div class="timeline-actions">
               ${executionActions(item, plan)}
               <button class="button ghost compact" data-action="open-detail" data-item-id="${escapeHtml(item.id)}">详情</button>
               <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>调整时间</button>
@@ -426,6 +464,7 @@
     state.answers = {};
     state.currentIndex = 0;
     state.result = null;
+    state.recommendation = null;
     state.profileInsight = null;
     state.plan = null;
     state.feedbackItemId = null;
@@ -531,6 +570,12 @@
     state.error = '';
     render();
     try {
+      try {
+        const user = await api.ensureAnonymousUser();
+        state.userId = user.user_id || null;
+      } catch (_) {
+        state.userId = api.currentUserId ? api.currentUserId() : null;
+      }
       const storedSessionId = api.getSessionId();
       if (!storedSessionId) {
         await createFreshSession();
@@ -656,8 +701,10 @@
       free_start: freeStart.toISOString(),
       free_end: freeEnd.toISOString(),
       density: state.profile.pace === 'relaxed' ? 'light' : state.profile.pace === 'full' ? 'full' : 'balanced',
+      user_id: state.userId,
     });
     state.plan = generated.plan;
+    state.recommendation = generated.recommendation || null;
     state.step = 'result';
   }
 
@@ -732,18 +779,65 @@
       await runTask(generateCurrentPlan);
       return;
     }
-    if (action === 'start-execution' || action === 'complete-execution' || action === 'skip-execution' || action === 'check-deadline') {
+    if (action === 'start-execution') {
+      state.energyItemId = control.dataset.itemId;
+      state.energyChoice = null;
+      state.energyReplacementSuggested = false;
+      render();
+      return;
+    }
+    if (action === 'choose-energy') {
+      state.energyChoice = control.dataset.energy;
+      render();
+      return;
+    }
+    if (action === 'confirm-energy-start') {
+      const plan = state.plan;
+      if (!plan || !state.energyItemId || !state.energyChoice) return;
+      await runTask(async () => {
+        const prepare = await api.prepareExecution(plan.plan_id, state.energyItemId, {
+          user_id: state.userId,
+          energy: state.energyChoice,
+        });
+        if (prepare.recommended_action === 'replace_easier') {
+          state.energyReplacementSuggested = true;
+          return;
+        }
+        const payload = await api.startExecution(plan.plan_id, state.energyItemId, { user_id: state.userId });
+        applyExecutionPayload(payload);
+        state.energyItemId = null;
+        state.energyChoice = null;
+        showToast('任务已开始');
+      });
+      return;
+    }
+    if (action === 'replace-easier') {
+      const plan = state.plan;
+      if (!plan || !state.energyItemId) return;
+      await runTask(async () => {
+        state.plan = await api.replacePlanItemEasier(plan.plan_id, state.energyItemId, {
+          expected_version: plan.version,
+          user_id: state.userId,
+        });
+        state.energyItemId = null;
+        state.energyChoice = null;
+        state.energyReplacementSuggested = false;
+        showToast('已换成更轻松的任务');
+      });
+      return;
+    }
+    if (action === 'complete-execution' || action === 'skip-execution' || action === 'check-deadline') {
       const plan = state.plan;
       if (!plan) return;
       const itemId = control.dataset.itemId;
-      const executionCall = action === 'start-execution'
-        ? api.startExecution
-        : action === 'complete-execution' ? api.completeExecution
-          : action === 'skip-execution' ? api.skipExecution : api.checkExecutionDeadline;
       await runTask(async () => {
-        const payload = await executionCall(plan.plan_id, itemId, {});
+        const payload = action === 'complete-execution'
+          ? await api.completeExecution(plan.plan_id, itemId, { user_id: state.userId })
+          : action === 'skip-execution'
+            ? await api.skipExecution(plan.plan_id, itemId, { user_id: state.userId })
+            : await api.checkExecutionDeadline(plan.plan_id, itemId, { user_id: state.userId });
         applyExecutionPayload(payload);
-        showToast(action === 'start-execution' ? '任务已开始' : action === 'complete-execution' ? '任务已完成' : action === 'skip-execution' ? '任务已跳过，稍后可重新排程' : '已检查任务截止时间');
+        showToast(action === 'complete-execution' ? '任务已完成' : action === 'skip-execution' ? '任务已跳过，稍后可重新排程' : '已检查任务截止时间');
       });
       return;
     }
@@ -852,9 +946,7 @@
         state.plan = await api.replacePlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
         });
-        const item = state.plan.items.find((entry) => entry.id === control.dataset.itemId);
-        const reason = flow.taskReasonSummary(item).replacementReason;
-        showToast(reason || '已更换任务');
+        showToast('已更换任务');
       });
       return;
     }

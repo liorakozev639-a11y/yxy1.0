@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { STORAGE_KEY, createApi } = require('../frontend/api.js');
+const { STORAGE_KEY, USER_STORAGE_KEY, createApi } = require('../frontend/api.js');
 
 function createStorage() {
   const values = new Map();
@@ -94,4 +94,44 @@ test('API errors preserve status and backend message', async () => {
       && error.code === 'session_not_found'
       && error.message === '会话不存在',
   );
+});
+
+test('ensureAnonymousUser creates and persists the anonymous user id', async () => {
+  const calls = [];
+  const storage = createStorage();
+  const api = createApi({
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ data: { user_id: 'user_001', created: true }, error: null });
+    },
+  });
+
+  const user = await api.ensureAnonymousUser();
+
+  assert.equal(user.user_id, 'user_001');
+  assert.equal(storage.getItem(USER_STORAGE_KEY), 'user_001');
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/v1/users/anonymous');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {});
+});
+
+test('ensureAnonymousUser reuses the persisted id and execution preparation routes', async () => {
+  const calls = [];
+  const storage = createStorage();
+  storage.setItem(USER_STORAGE_KEY, 'user_existing');
+  const api = createApi({
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ data: { user_id: 'user_existing' }, error: null });
+    },
+  });
+
+  await api.ensureAnonymousUser();
+  await api.prepareExecution('plan_1', 'item_1', { energy: 'low', user_id: 'user_1' });
+  await api.replacePlanItemEasier('plan_1', 'item_1', { expected_version: 2, user_id: 'user_1' });
+
+  assert.deepEqual(JSON.parse(calls[0].options.body), { user_id: 'user_existing' });
+  assert.equal(calls[1].url, 'http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/execution/prepare');
+  assert.equal(calls[2].url, 'http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/replace-easier');
 });

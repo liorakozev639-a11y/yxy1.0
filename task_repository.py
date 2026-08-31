@@ -5,7 +5,10 @@ reviewed questionnaire bank. It runs without PostgreSQL, FastAPI, MQ,
 asynchronous workers, maps, merchants, or live activity APIs.
 """
 
-"""在任务库中目前无法做到通过智能搜索用户所在具体地址附近的商铺，基础设施，可供娱乐活动的场所等，无法形成智能化的任务推荐，因此手动添加了人工任务库，五个类别分别设置了十个任务，共五十个任务，仅供mvp测试版用户的参考，后续具体添加的方向为设置智能搜索agent，为用户实时提供具体的活动场所;同时设置五十个问题，对应用户选择的意向休闲活动的类别，用于quick和deep版的问卷调查，为后续的人物画像和推荐任务模块提供参考数据"""
+"""当前任务库以人工审核的通用任务为主，暂不依赖实时商户、地点或营业时间搜索。
+五个类别各维护 60 个任务，共 300 个任务；任务会按预算、时长、出行、同行方式和使用场景过滤，
+再交给 Recommendation Module 按问卷画像排序。问卷题目由 Questionnaire Module 独立维护，
+用于 quick 和 deep 模式的偏好画像与推荐。"""
 
 from collections import Counter
 from dataclasses import dataclass
@@ -34,6 +37,8 @@ QUESTION_SCALE = {
     4: "非常同意",
 }
 
+LOCATION_DEPENDENCIES = {"home", "nearby", "city", "flexible"}
+
 
 @dataclass(frozen=True)
 class Task:
@@ -50,6 +55,20 @@ class Task:
     owner_session_id: Optional[str] = None
     scenarios: tuple[str, ...] = ()
     feedback_group: str = ""
+    ease_level: int = 3
+    physical_load: int = 3
+    social_pressure: int = 3
+    location_dependency: str = "flexible"
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.ease_level <= 5:
+            raise ValueError("任务轻松度必须在 1-5 之间")
+        if not 1 <= self.physical_load <= 5:
+            raise ValueError("任务体力消耗必须在 1-5 之间")
+        if not 1 <= self.social_pressure <= 5:
+            raise ValueError("任务社交压力必须在 1-5 之间")
+        if self.location_dependency not in LOCATION_DEPENDENCIES:
+            raise ValueError("任务地点依赖不在允许范围内")
 
 
 # Each category contains exactly thirty activities. The scenario tags allow the
@@ -255,6 +274,106 @@ _ACTIVITY_ROWS = [
     ("task_growth_38", "为正在学的课程列三个问题", "自我成长", 20, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
     ("task_growth_39", "练习一首简单乐器片段", "自我成长", 25, 0, "home", "solo", ("想独处但不想完全躺平", "周末不知道做什么")),
     ("task_growth_40", "整理一本待读书单", "自我成长", 20, 0, "home", "solo", ("临时改变想法", "想独处但不想完全躺平")),
+    ("task_energy_41", "做一组五分钟唤醒操", "活力充电", 10, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_energy_42", "沿小区慢走一圈", "活力充电", 20, 0, "nearby", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_energy_43", "练习一轮肩颈舒展", "活力充电", 15, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_energy_44", "做一次轻量瑜伽流动", "活力充电", 30, 0, "home", "solo", ("想独处但不想完全躺平", "工作后精力不足")),
+    ("task_energy_45", "去楼下晒太阳并散步", "活力充电", 25, 0, "nearby", "solo", ("突然获得半天休息时间", "工作后精力不足")),
+    ("task_energy_46", "完成一轮低强度深蹲", "活力充电", 15, 0, "home", "solo", ("临时改变想法", "想独处但不想完全躺平")),
+    ("task_energy_47", "在公园慢走并听音乐", "活力充电", 35, 0, "nearby", "solo", ("周末不知道做什么", "想独处但不想完全躺平")),
+    ("task_energy_48", "尝试十分钟节奏操", "活力充电", 15, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_energy_49", "做一组手腕和手臂放松", "活力充电", 10, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_energy_50", "骑车去附近买饮品", "活力充电", 35, 20, "nearby", "solo", ("突然获得半天休息时间", "临时改变想法")),
+    ("task_energy_51", "完成一次楼梯慢走练习", "活力充电", 15, 0, "nearby", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_energy_52", "做一轮站立平衡练习", "活力充电", 15, 0, "home", "solo", ("想独处但不想完全躺平", "临时改变想法")),
+    ("task_energy_53", "在窗边做呼吸与伸展", "活力充电", 15, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_energy_54", "和同伴进行轻松投篮", "活力充电", 45, 0, "nearby", "group", ("周末不知道做什么", "突然获得半天休息时间")),
+    ("task_energy_55", "完成一次短时跳舞练习", "活力充电", 20, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_energy_56", "沿河边或绿道散步", "活力充电", 45, 0, "nearby", "both", ("突然获得半天休息时间", "周末不知道做什么")),
+    ("task_energy_57", "做一组温和核心激活", "活力充电", 20, 0, "home", "solo", ("想独处但不想完全躺平", "临时改变想法")),
+    ("task_energy_58", "跟着音乐做手臂操", "活力充电", 15, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_energy_59", "去附近广场慢走观察", "活力充电", 30, 0, "nearby", "solo", ("想独处但不想完全躺平", "周末不知道做什么")),
+    ("task_energy_60", "完成一次睡前舒缓拉伸", "活力充电", 20, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_recovery_41", "泡一杯温热花草茶", "松弛疗愈", 15, 20, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_recovery_42", "做一段五分钟呼吸练习", "松弛疗愈", 10, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_recovery_43", "听窗外声音放空一会", "松弛疗愈", 15, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_recovery_44", "换上舒适衣服休息", "松弛疗愈", 15, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_recovery_45", "做一次简单足部放松", "松弛疗愈", 20, 10, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_recovery_46", "整理一个舒适的休息角落", "松弛疗愈", 20, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_recovery_47", "在阳台安静晒太阳", "松弛疗愈", 20, 0, "home", "solo", ("想独处但不想完全躺平", "工作后精力不足")),
+    ("task_recovery_48", "做一次三分钟眼部放松", "松弛疗愈", 10, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_recovery_49", "读几页轻松散文", "松弛疗愈", 20, 0, "home", "solo", ("想独处但不想完全躺平", "工作后精力不足")),
+    ("task_recovery_50", "听一段自然环境音", "松弛疗愈", 15, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_recovery_51", "做一次温和肩颈热敷", "松弛疗愈", 20, 15, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_recovery_52", "关掉通知安静休息一会", "松弛疗愈", 20, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_recovery_53", "写下此刻最想放下的事", "松弛疗愈", 15, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_recovery_54", "做一套舒缓睡前动作", "松弛疗愈", 20, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_recovery_55", "去安静街角坐一坐", "松弛疗愈", 25, 0, "nearby", "solo", ("突然获得半天休息时间", "工作后精力不足")),
+    ("task_recovery_56", "看一段低刺激风景视频", "松弛疗愈", 20, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_recovery_57", "给自己准备一份水果", "松弛疗愈", 15, 20, "nearby", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_recovery_58", "完成一次身体扫描冥想", "松弛疗愈", 15, 0, "home", "solo", ("想独处但不想完全躺平", "工作后精力不足")),
+    ("task_recovery_59", "慢慢收拾并擦拭书桌", "松弛疗愈", 25, 0, "home", "solo", ("临时改变想法", "想独处但不想完全躺平")),
+    ("task_recovery_60", "听喜欢的歌曲并闭目休息", "松弛疗愈", 20, 0, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_social_41", "给朋友发一张近况照片", "社交连接", 10, 0, "home", "both", ("临时改变想法", "工作后精力不足")),
+    ("task_social_42", "和同学互相分享午餐灵感", "社交连接", 15, 0, "home", "both", ("临时改变想法", "周末不知道做什么")),
+    ("task_social_43", "和家人一起看一集节目", "社交连接", 45, 0, "home", "group", ("工作后精力不足", "周末不知道做什么")),
+    ("task_social_44", "约朋友线上玩一局小游戏", "社交连接", 30, 0, "home", "both", ("临时改变想法", "周末不知道做什么")),
+    ("task_social_45", "和室友一起买饮品散步", "社交连接", 30, 20, "nearby", "group", ("工作后精力不足", "周末不知道做什么")),
+    ("task_social_46", "参加一次轻松线上分享", "社交连接", 45, 0, "home", "group", ("周末不知道做什么", "临时改变想法")),
+    ("task_social_47", "和朋友交换一条歌单", "社交连接", 15, 0, "home", "both", ("想独处但不想完全躺平", "临时改变想法")),
+    ("task_social_48", "和同伴一起做简单拉伸", "社交连接", 20, 0, "home", "group", ("工作后精力不足", "周末不知道做什么")),
+    ("task_social_49", "给久未联系的人留言", "社交连接", 10, 0, "home", "both", ("临时改变想法", "工作后精力不足")),
+    ("task_social_50", "和家人聊聊最近的小发现", "社交连接", 20, 0, "home", "both", ("工作后精力不足", "周末不知道做什么")),
+    ("task_social_51", "和朋友进行一次轻松问答", "社交连接", 25, 0, "home", "both", ("临时改变想法", "想独处但不想完全躺平")),
+    ("task_social_52", "约同学在校园坐坐", "社交连接", 40, 0, "nearby", "group", ("周末不知道做什么", "突然获得半天休息时间")),
+    ("task_social_53", "一起完成一份简单拼图", "社交连接", 45, 30, "home", "group", ("周末不知道做什么", "想独处但不想完全躺平")),
+    ("task_social_54", "和朋友互相推荐一部电影", "社交连接", 15, 0, "home", "both", ("临时改变想法", "工作后精力不足")),
+    ("task_social_55", "和室友一起整理公共区域", "社交连接", 30, 0, "home", "group", ("临时改变想法", "周末不知道做什么")),
+    ("task_social_56", "与同伴进行一次短途散步", "社交连接", 35, 0, "nearby", "group", ("工作后精力不足", "突然获得半天休息时间")),
+    ("task_social_57", "给家人发一段语音问候", "社交连接", 10, 0, "home", "both", ("临时改变想法", "工作后精力不足")),
+    ("task_social_58", "和朋友一起做一杯饮品", "社交连接", 30, 20, "home", "group", ("周末不知道做什么", "临时改变想法")),
+    ("task_social_59", "参加一次小组兴趣练习", "社交连接", 50, 0, "home", "group", ("周末不知道做什么", "突然获得半天休息时间")),
+    ("task_social_60", "和熟人分享本周一件开心事", "社交连接", 15, 0, "home", "both", ("工作后精力不足", "临时改变想法")),
+    ("task_explore_41", "尝试一种新的早餐搭配", "乐享探索", 30, 30, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_explore_42", "去附近寻找一面有趣的墙", "乐享探索", 35, 0, "nearby", "solo", ("周末不知道做什么", "想独处但不想完全躺平")),
+    ("task_explore_43", "做一份随机水果拼盘", "乐享探索", 25, 25, "home", "both", ("临时改变想法", "周末不知道做什么")),
+    ("task_explore_44", "听一集新主题播客", "乐享探索", 45, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_explore_45", "逛一圈附近文具店", "乐享探索", 40, 30, "nearby", "solo", ("想独处但不想完全躺平", "临时改变想法")),
+    ("task_explore_46", "在家尝试一种新调味", "乐享探索", 30, 15, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_explore_47", "拍摄五张身边的几何图案", "乐享探索", 40, 0, "nearby", "solo", ("想独处但不想完全躺平", "周末不知道做什么")),
+    ("task_explore_48", "随机选择一部短纪录片", "乐享探索", 50, 0, "home", "both", ("工作后精力不足", "周末不知道做什么")),
+    ("task_explore_49", "去附近公园寻找一处新角落", "乐享探索", 45, 0, "nearby", "solo", ("突然获得半天休息时间", "想独处但不想完全躺平")),
+    ("task_explore_50", "制作一份主题零食组合", "乐享探索", 35, 40, "home", "both", ("周末不知道做什么", "临时改变想法")),
+    ("task_explore_51", "找一条新路线回家", "乐享探索", 35, 0, "nearby", "solo", ("临时改变想法", "突然获得半天休息时间")),
+    ("task_explore_52", "体验一次线上虚拟展览", "乐享探索", 60, 0, "home", "both", ("周末不知道做什么", "想独处但不想完全躺平")),
+    ("task_explore_53", "为房间拍一组主题照片", "乐享探索", 30, 0, "home", "solo", ("临时改变想法", "想独处但不想完全躺平")),
+    ("task_explore_54", "尝试一种新的无酒精饮品", "乐享探索", 30, 25, "nearby", "both", ("工作后精力不足", "临时改变想法")),
+    ("task_explore_55", "去附近观察季节变化", "乐享探索", 40, 0, "nearby", "solo", ("突然获得半天休息时间", "周末不知道做什么")),
+    ("task_explore_56", "给熟悉的歌单换个主题", "乐享探索", 25, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_explore_57", "安排一次小型家庭观影", "乐享探索", 90, 30, "home", "group", ("周末不知道做什么", "想独处但不想完全躺平")),
+    ("task_explore_58", "买一份没尝试过的水果", "乐享探索", 30, 30, "nearby", "both", ("临时改变想法", "工作后精力不足")),
+    ("task_explore_59", "做一次五分钟创意涂鸦", "乐享探索", 20, 0, "home", "solo", ("想独处但不想完全躺平", "临时改变想法")),
+    ("task_explore_60", "为今天设计一个小主题", "乐享探索", 20, 0, "home", "solo", ("临时改变想法", "周末不知道做什么")),
+    ("task_growth_41", "整理一页近期想法", "自我成长", 20, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_growth_42", "学习一个键盘快捷操作", "自我成长", 10, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_growth_43", "阅读一篇短科普文章", "自我成长", 25, 0, "home", "solo", ("想独处但不想完全躺平", "工作后精力不足")),
+    ("task_growth_44", "复盘一次最近的沟通", "自我成长", 20, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_growth_45", "练习一段英文听力", "自我成长", 30, 0, "home", "solo", ("想独处但不想完全躺平", "临时改变想法")),
+    ("task_growth_46", "整理一份个人灵感清单", "自我成长", 25, 0, "home", "solo", ("周末不知道做什么", "想独处但不想完全躺平")),
+    ("task_growth_47", "完成一个十分钟逻辑练习", "自我成长", 15, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_growth_48", "写下三个想继续保持的习惯", "自我成长", 15, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_growth_49", "学习一个简单构图技巧", "自我成长", 25, 0, "home", "solo", ("想独处但不想完全躺平", "周末不知道做什么")),
+    ("task_growth_50", "整理一份数字资料收藏", "自我成长", 30, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_growth_51", "为一个小目标写行动第一步", "自我成长", 15, 0, "home", "solo", ("临时改变想法", "想独处但不想完全躺平")),
+    ("task_growth_52", "完成一页轻量练字", "自我成长", 25, 10, "home", "solo", ("工作后精力不足", "想独处但不想完全躺平")),
+    ("task_growth_53", "学习一道简单菜的原理", "自我成长", 30, 20, "home", "solo", ("临时改变想法", "周末不知道做什么")),
+    ("task_growth_54", "把一个大任务拆成三步", "自我成长", 20, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_growth_55", "听一段知识音频并记一句话", "自我成长", 20, 0, "home", "solo", ("想独处但不想完全躺平", "工作后精力不足")),
+    ("task_growth_56", "写一段给自己的鼓励", "自我成长", 15, 0, "home", "solo", ("工作后精力不足", "临时改变想法")),
+    ("task_growth_57", "整理一次电脑桌面", "自我成长", 25, 0, "home", "solo", ("临时改变想法", "工作后精力不足")),
+    ("task_growth_58", "练习一小段绘画线条", "自我成长", 20, 10, "home", "solo", ("想独处但不想完全躺平", "临时改变想法")),
+    ("task_growth_59", "为下周准备一个提醒清单", "自我成长", 20, 0, "home", "solo", ("工作后精力不足", "周末不知道做什么")),
+    ("task_growth_60", "阅读并摘录一段喜欢的话", "自我成长", 25, 0, "home", "solo", ("想独处但不想完全躺平", "临时改变想法")),
 ]
 
 
@@ -289,6 +408,83 @@ def feedback_group_for(task_id: str, category: str) -> str:
     groups = FEEDBACK_GROUPS[category]
     return groups[(int(task_id.rsplit("_", 1)[1]) - 1) % len(groups)]
 
+
+def _clamp_level(value: int) -> int:
+    return max(1, min(5, value))
+
+
+def infer_task_load(
+    title: str,
+    category: str,
+    duration: int,
+    budget: int,
+    outing: str,
+    company: str,
+) -> dict[str, int | str]:
+    """Infer task intensity metadata from the existing curated task bank."""
+    high_physical_keywords = (
+        "训练", "慢跑", "快走", "骑行", "球", "燃脂", "跳绳", "台阶", "爬楼梯",
+        "拳击操", "静蹲", "有氧", "核心", "坡道",
+    )
+    low_physical_keywords = (
+        "拉伸", "舒展", "舒缓", "冥想", "呼吸", "小睡", "放空", "听", "阅读",
+        "热敷", "泡脚", "晒太阳", "写下", "闭眼", "闭目", "发呆",
+    )
+
+    physical = 2
+    if category == "活力充电":
+        physical = 3
+    if any(keyword in title for keyword in high_physical_keywords):
+        physical += 1
+    if any(keyword in title for keyword in low_physical_keywords):
+        physical -= 1
+    if duration >= 60 and category in {"活力充电", "社交连接", "乐享探索"}:
+        physical += 1
+    physical_load = _clamp_level(physical)
+
+    if duration <= 15:
+        ease = 5
+    elif duration <= 30:
+        ease = 4
+    elif duration <= 60:
+        ease = 3
+    elif duration <= 90:
+        ease = 2
+    else:
+        ease = 1
+    if category == "松弛疗愈":
+        ease += 1
+    if outing == "home":
+        ease += 1
+    if outing == "city":
+        ease -= 1
+    if company == "group":
+        ease -= 1
+    if budget > 60:
+        ease -= 1
+    if physical_load >= 4:
+        ease -= 1
+    ease_level = _clamp_level(ease)
+
+    if company == "solo":
+        social = 1
+    elif company == "both":
+        social = 2
+    else:
+        social = 4
+    if category == "社交连接" and company == "group":
+        social += 1
+    social_pressure = _clamp_level(social)
+
+    location_dependency = outing if outing in {"home", "nearby", "city"} else "flexible"
+    return {
+        "ease_level": ease_level,
+        "physical_load": physical_load,
+        "social_pressure": social_pressure,
+        "location_dependency": location_dependency,
+    }
+
+
 PUBLIC_TASKS = [
     Task(
         id=task_id,
@@ -300,6 +496,7 @@ PUBLIC_TASKS = [
         company=company,
         scenarios=scenarios,
         feedback_group=feedback_group_for(task_id, category),
+        **infer_task_load(title, category, duration, budget, outing, company),
     )
     for task_id, title, category, duration, budget, outing, company, scenarios
     in _ACTIVITY_ROWS
@@ -337,6 +534,10 @@ class TaskRepository:
             owner_session_id=session_id,
             scenarios=task.scenarios,
             feedback_group=task.feedback_group or f"custom:{task.id}",
+            ease_level=task.ease_level,
+            physical_load=task.physical_load,
+            social_pressure=task.social_pressure,
+            location_dependency=task.location_dependency,
         )
         self.custom_tasks.setdefault(session_id, []).append(custom_task)
         return custom_task
@@ -393,8 +594,8 @@ class TaskRepository:
 def demo() -> None:
 
     category_counts = Counter(task.category for task in PUBLIC_TASKS)
-    assert len(PUBLIC_TASKS) == 200
-    assert category_counts == {category: 40 for category in CATEGORIES}
+    assert len(PUBLIC_TASKS) == 300
+    assert category_counts == {category: 60 for category in CATEGORIES}
     assert all(task.status == "approved" for task in PUBLIC_TASKS)
 
     repository = TaskRepository()

@@ -61,8 +61,6 @@ test('result view presents recommended times and execution controls', () => {
   assert.match(app, /data-action="skip-execution"/);
   assert.match(app, /data-action="save-feedback"/);
   assert.match(app, /needs_adjustment/);
-  assert.match(app, /recommendationMemorySummary/);
-  assert.match(app, /replacementReason/);
   assert.match(app, /api\.refreshExecution/);
   assert.match(app, /setInterval\(/);
   assert.match(app, /clearInterval\(/);
@@ -72,4 +70,27 @@ test('result view presents recommended times and execution controls', () => {
   assert.match(app, /satisfied/);
   assert.match(app, /neutral/);
   assert.match(app, /dissatisfied/);
+});
+
+test('execution start requires an energy choice and execution mutations carry user identity', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+
+  assert.match(app, /userId:\s*null/);
+  assert.match(app, /energyItemId:\s*null/);
+  assert.match(app, /energyChoice:\s*null/);
+  assert.match(app, /data-action="choose-energy"/);
+  assert.match(app, /data-action="confirm-energy-start"/);
+  assert.match(app, /data-action="replace-easier"/);
+  assert.match(app, /api\.prepareExecution/);
+  assert.match(app, /api\.replacePlanItemEasier/);
+  assert.match(app, /api\.startExecution\([^\n]+\{ user_id: state\.userId \}\)/);
+  assert.match(app, /api\.completeExecution\([^\n]+\{ user_id: state\.userId \}\)/);
+  assert.match(app, /api\.skipExecution\([^\n]+\{ user_id: state\.userId \}\)/);
+});
+
+test('result view does not show recommendation history explanations', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+
+  assert.doesNotMatch(app, /recommendationMemorySummary/);
+  assert.doesNotMatch(app, /replacementReason/);
 });

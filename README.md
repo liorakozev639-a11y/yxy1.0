@@ -73,11 +73,15 @@
 
 当前内置人工审核的通用任务库：
 
-- 共 **200 个活动任务**，五个活动分类各 40 个。
+- 共 **300 个活动任务**，五个活动分类各 60 个。
 - 共 **150 道题目**，五个分类各 30 道。
 - 每项任务带有分类、建议时长、预算、出行方式、同行方式和适用场景等元数据。
 
 推荐模块会先筛掉不符合预算、可用时间、出行方式、同行偏好或场景的任务，再根据画像分数和用户选择的优先级排序。系统返回最多 10 个候选任务，并尽量确保用户所选的每个分类都被覆盖。每个任务会附带匹配分、偏好标签、警示信息和推荐理由，便于用户判断是否保留。
+
+问卷提交后，MVP 编排器固定请求 10 个推荐任务，并在响应中返回 `recommended_task_count`、`task_ids` 和 `tasks`。正式前端会在计划结果页一次性展示这 10 个推荐任务；其中能够放入当前空闲时间窗口的任务会进入时间线，其余任务仍保留在推荐任务池中，不会因为时间不足而丢失。
+
+每个任务还带有任务轻重元数据：轻松度、体力消耗、社交压力和地点依赖。轻松度和其他负荷指标由任务分类、时长、预算、出行方式、同行方式及标题关键词规则化推导，便于后续按当下精力进行更细的排序和替换。
 
 ### 5. 自动排程与计划管理
 
@@ -275,3 +279,30 @@ Invoke-RestMethod `
 ```
 
 脚本会验证创建会话、保存偏好、提交问卷、画像、推荐、排程、网页交付和计划恢复。
+
+## 9. 本次任务库与十条推荐验收
+
+在仓库根目录执行：
+
+```powershell
+.\.venv-debug\Scripts\python.exe -m unittest `
+  tests.test_task_repository_expansion `
+  tests.test_recommendation_reasons `
+  tests.test_mvp_integration `
+  tests.test_scheduling_module -q
+
+node --test tests/frontend-flow.test.js `
+  tests/frontend-visual.test.js `
+  tests/frontend-api.test.js `
+  tests/demo-v2-logic.test.js
+```
+
+通过标准：
+
+- 任务库总数为 300 条，五个分类各 60 条。
+- 推荐响应中的 `recommended_task_count` 为 10。
+- `task_ids` 与 `tasks` 均包含 10 项，且任务 ID 不重复。
+- 前端计划结果页出现“本次推荐任务 10 个”。
+- 时间线根据用户空闲时间显示可排入的任务，并保留休息块。
+
+如果全量 Python 测试提示缺少 `SESSION_DATABASE_URL`，先按照第 3 节设置 PostgreSQL 连接变量；任务库和推荐逻辑的离线测试不依赖在线数据库。

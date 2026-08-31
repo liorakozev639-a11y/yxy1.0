@@ -11,6 +11,7 @@
   }
 }(typeof window !== 'undefined' ? window : null, function () {
   const STORAGE_KEY = 'free_time_agent_session_id';
+  const USER_STORAGE_KEY = 'free_time_agent_user_id';
   function defaultBaseUrl() {
     if (typeof window !== 'undefined' && window.location?.hostname) {
       return `${window.location.protocol}//${window.location.hostname}:8000`;
@@ -63,6 +64,20 @@
 
     function getSessionId() {
       return storage.getItem(STORAGE_KEY);
+    }
+
+    function currentUserId() {
+      return storage.getItem(USER_STORAGE_KEY);
+    }
+
+    async function ensureAnonymousUser() {
+      const existing = currentUserId();
+      const data = await request('/api/v1/users/anonymous', {
+        method: 'POST',
+        body: existing ? { user_id: existing } : {},
+      });
+      if (data.user_id) storage.setItem(USER_STORAGE_KEY, data.user_id);
+      return data;
     }
 
     function requireSessionId(sessionId) {
@@ -197,12 +212,26 @@
       return executionRequest(planId, itemId, 'start', input);
     }
 
+    function prepareExecution(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/execution/prepare`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
     function completeExecution(planId, itemId, input = {}) {
       return executionRequest(planId, itemId, 'complete', input);
     }
 
     function skipExecution(planId, itemId, input = {}) {
       return executionRequest(planId, itemId, 'skip', input);
+    }
+
+    function replacePlanItemEasier(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/replace-easier`, {
+        method: 'POST',
+        body: input,
+      });
     }
 
     function checkExecutionDeadline(planId, itemId, input = {}) {
@@ -257,6 +286,8 @@
       completeExecution,
       confirmPlan,
       createSession,
+      currentUserId,
+      ensureAnonymousUser,
       forgetSession,
       getFeedback,
       getReview,
@@ -267,6 +298,7 @@
       generatePlan,
       restoreSession,
       replacePlanItem,
+      replacePlanItemEasier,
       replan,
       refreshExecution,
       saveFeedback,
@@ -277,11 +309,12 @@
       skipQuestion,
       skipPlanItem,
       startExecution,
+      prepareExecution,
       startQuestionnaire,
       submitQuestionnaire,
       updatePlanItem,
     };
   }
 
-  return { ApiError, DEFAULT_BASE_URL, STORAGE_KEY, createApi };
+  return { ApiError, DEFAULT_BASE_URL, STORAGE_KEY, USER_STORAGE_KEY, createApi };
 }));
