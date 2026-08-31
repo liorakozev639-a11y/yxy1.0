@@ -537,6 +537,23 @@ def create_app(
             )
         )
 
+    @app.post("/api/v1/plans/{plan_id}/recommended-tasks/{task_id}")
+    def add_recommended_task(
+        plan_id: str,
+        task_id: str,
+        body: PlanItemMutationInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            manager.add_recommended_task(
+                session_id,
+                plan_id,
+                task_id,
+                body.expected_version,
+            )
+        )
+
     @app.post("/api/v1/plans/{plan_id}/confirm")
     def confirm_plan(plan_id: str, body: PlanConfirmInput) -> dict[str, Any]:
         manager = require_plan_service()

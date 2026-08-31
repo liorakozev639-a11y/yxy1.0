@@ -547,6 +547,9 @@ class MVPOrchestrator:
                 "match_score": task.get("match_score"),
                 "matched_preferences": task.get("matched_preferences", []),
                 "warning_text": task.get("warning_text", ""),
+                "duration": task.get("duration"),
+                "budget": task.get("budget"),
+                "load_profile": task.get("load_profile"),
             }
             for task in recommendation.get("tasks", [])
         }

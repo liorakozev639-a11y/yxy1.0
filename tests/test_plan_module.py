@@ -75,6 +75,21 @@ class PlanModuleLiveTests(unittest.TestCase):
         plan = generated.json()["data"]["plan"]
         self.assertEqual(plan["session_id"], sid)
         self.assertTrue(plan["items"])
+        recommended = generated.json()["data"]["recommendation"]["tasks"]
+        scheduled_ids = {item.get("task_id") for item in plan["items"]}
+        to_add = next(task for task in recommended if task["id"] not in scheduled_ids)
+
+        added_recommendation = self.client.post(
+            f"/api/v1/plans/{plan['plan_id']}/recommended-tasks/{to_add['id']}",
+            json={"expected_version": plan["version"]},
+        )
+        self.assertEqual(added_recommendation.status_code, 200, added_recommendation.text)
+        plan = added_recommendation.json()["data"]
+        self.assertEqual(plan["version"], 2)
+        added_item = next(item for item in plan["items"] if item.get("task_id") == to_add["id"])
+        self.assertEqual(added_item["duration"], to_add["duration"])
+        self.assertEqual(added_item["budget"], to_add["budget"])
+        self.assertIn("load_profile", added_item)
 
         updated = self.client.post(
             f"/api/v1/plans/{plan['plan_id']}/custom-tasks",
@@ -87,7 +102,7 @@ class PlanModuleLiveTests(unittest.TestCase):
         )
         self.assertEqual(updated.status_code, 200, updated.text)
         plan = updated.json()["data"]
-        self.assertEqual(plan["version"], 2)
+        self.assertEqual(plan["version"], 3)
         custom = next(item for item in plan["items"] if item["title"] == "写下今天的复盘")
 
         skipped = self.client.post(
@@ -96,7 +111,7 @@ class PlanModuleLiveTests(unittest.TestCase):
         )
         self.assertEqual(skipped.status_code, 200, skipped.text)
         plan = skipped.json()["data"]
-        self.assertEqual(plan["version"], 3)
+        self.assertEqual(plan["version"], 4)
         self.assertEqual(plan["recommendation_memory"]["excluded_group_count"], 1)
 
         confirmed = self.client.post(

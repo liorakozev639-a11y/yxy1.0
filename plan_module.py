@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 
 from mvp_orchestrator import GeneratePlanRequest
 from recommendation_module import (
+    build_load_profile,
     build_matched_preferences,
     build_reason_tags,
     build_reason_text,
@@ -178,6 +179,11 @@ def enrich_plan_item_payload(item: dict[str, Any], task: Task | None = None) -> 
         payload["warning_text"] = ""
         payload["match_score"] = 1.0
         return payload
+
+    if task is not None:
+        payload["duration"] = task.duration
+        payload["budget"] = task.budget
+        payload["load_profile"] = build_load_profile(task)
 
     start_at = item["start_at"]
     end_at = item["end_at"]
@@ -573,6 +579,55 @@ class PlanManagementService:
             self.user_history.record_action(user_id, session_id, saved["plan_id"], replacement_item["id"], "replaced_to")
         except Exception:
             logger.exception("用户历史替换记录失败，不影响计划替换")
+
+    def add_recommended_task(
+        self,
+        session_id: str,
+        plan_id: str,
+        task_id: str,
+        expected_version: int,
+    ) -> dict[str, Any]:
+        plan = self._require(session_id, plan_id)
+        self._check_version(plan, expected_version)
+        candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+        task = next((candidate for candidate in candidates if candidate.id == task_id), None)
+        if task is None:
+            raise HTTPException(status_code=404, detail="推荐任务不存在")
+        if any(
+            item.get("task_id") == task.id and item.get("status") != "skipped"
+            for item in plan["items"]
+        ):
+            raise HTTPException(status_code=409, detail="该任务已经在当前计划中")
+
+        cursor = self._parse_time(plan["free_start"])
+        active = sorted(
+            (item for item in plan["items"] if item["status"] != "skipped"),
+            key=lambda item: item["start_at"],
+        )
+        for item in active:
+            item_start = self._parse_time(item["start_at"])
+            item_end = self._parse_time(item["end_at"])
+            if cursor + timedelta(minutes=task.duration) <= item_start:
+                break
+            cursor = max(cursor, item_end + timedelta(minutes=15))
+        end = cursor + timedelta(minutes=task.duration)
+        self._ensure_slot(plan, cursor, end)
+        items = [dict(item) for item in plan["items"]]
+        items.append(
+            {
+                "id": make_id("item"),
+                "task_id": task.id,
+                "title": task.title,
+                "category": task.category,
+                "start_at": cursor.isoformat(),
+                "end_at": end.isoformat(),
+                "kind": "task",
+                "status": "pending",
+                "locked": True,
+                "replacement_history": [],
+            }
+        )
+        return self._save_version(plan, items)
 
     def add_custom_task(self, session_id: str, plan_id: str, expected_version: int, title: str, duration_minutes: int, category: str | None = None) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)

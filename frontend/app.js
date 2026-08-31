@@ -305,6 +305,18 @@
     return `<div class="reason-tags">${summary.tags.slice(0, 5).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>`;
   }
 
+  function taskLoadSummary(item) {
+    const summary = flow.taskReasonSummary(item);
+    const values = [
+      ['轻松度', summary.loadProfile && summary.loadProfile.ease],
+      ['体力消耗', summary.loadProfile && summary.loadProfile.physical],
+      ['社交压力', summary.loadProfile && summary.loadProfile.social],
+      ['预算', Number.isFinite(Number(item.budget)) ? `${item.budget} 元以内` : '--'],
+      ['地点依赖', summary.loadProfile && summary.loadProfile.location],
+    ];
+    return `<div class="task-load-summary" aria-label="任务轻重与限制">${values.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value || '--')}</b></span>`).join('')}</div>`;
+  }
+
   function loadProfile(summary) {
     if (!summary.loadProfile) return '';
     const items = [
@@ -393,7 +405,7 @@
 
   function executionActions(item, plan) {
     if (item.recommendationOnly) {
-      return '<span class="execution-status recommendation-status">待安排到当前时间线</span>';
+      return `<button class="button primary compact" data-action="add-recommended-task" data-item-id="${escapeHtml(item.task_id)}" ${state.busy ? 'disabled' : ''}>加入时间线</button><span class="execution-status recommendation-status">待安排到当前时间线</span>`;
     }
     const disabled = state.busy ? 'disabled' : '';
     if (item.status === 'pending') {
@@ -459,7 +471,7 @@
       : '';
     return `<article class="timeline-item pixel-timeline-item recommended-task-card status-${escapeHtml(status)} ${item.recommendationOnly ? 'is-recommendation-only' : ''} ${status === 'skipped' ? 'is-skipped' : ''}">
       <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${time}</div>
-      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${reasonTags(item)}<div class="timeline-actions">
+      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${reasonTags(item)}${taskLoadSummary(item)}<div class="timeline-actions">
         ${executionActions(item, plan)}
         ${detailButton}
         ${editButton}
@@ -1032,6 +1044,19 @@
           expected_version: plan.version,
         });
         showToast('已更换任务');
+      });
+      return;
+    }
+    if (action === 'add-recommended-task') {
+      const plan = state.plan;
+      if (!plan) return;
+      await runTask(async () => {
+        state.plan = await api.addRecommendedTask(
+          plan.plan_id,
+          control.dataset.itemId,
+          { expected_version: plan.version },
+        );
+        showToast('已加入时间线');
       });
       return;
     }

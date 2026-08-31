@@ -79,6 +79,24 @@ test('questionnaire methods use the unified API contract', async () => {
   assert.ok(calls.every((call) => !('Authorization' in call.options.headers)));
 });
 
+test('recommended task methods add a task to an existing plan', async () => {
+  const calls = [];
+  const storage = createStorage();
+  const api = createApi({
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ data: { plan_id: 'plan_1', version: 2 }, error: null });
+    },
+  });
+
+  await api.addRecommendedTask('plan_1', 'task_energy_01', { expected_version: 1 });
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/v1/plans/plan_1/recommended-tasks/task_energy_01');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { expected_version: 1 });
+});
+
 test('API errors preserve status and backend message', async () => {
   const api = createApi({
     storage: createStorage(),

@@ -187,6 +187,13 @@
       });
     }
 
+    function addRecommendedTask(planId, taskId, input) {
+      return request(`/api/v1/plans/${planId}/recommended-tasks/${taskId}`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
     function confirmPlan(planId, input) {
       return request(`/api/v1/plans/${planId}/confirm`, {
         method: 'POST',
@@ -282,6 +289,7 @@
     return {
       clearSession,
       addCustomTask,
+      addRecommendedTask,
       checkExecutionDeadline,
       completeExecution,
       confirmPlan,

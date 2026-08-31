@@ -42,6 +42,8 @@ test('formal result markup keeps real plan actions inside pixel timeline', () =>
   assert.match(app, /data-action="confirm-plan"/);
   assert.match(app, /data-action="start-execution"/);
   assert.match(app, /recommended-task-card/);
+  assert.match(app, /data-action="add-recommended-task"/);
+  assert.match(app, /task-load-summary/);
   assert.match(app, /additionalPlanItems/);
 });
 
