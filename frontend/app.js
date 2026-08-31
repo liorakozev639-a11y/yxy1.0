@@ -64,6 +64,31 @@
     }[character]));
   }
 
+  function recommendationStorageKey() {
+    return state.sessionId ? `free_time_agent_recommendation_${state.sessionId}` : '';
+  }
+
+  function persistRecommendation(recommendation) {
+    const key = recommendationStorageKey();
+    if (!key || !recommendation || !Array.isArray(recommendation.tasks)) return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(recommendation));
+    } catch (_) {
+      // Local storage can be unavailable in private browsing; the live state still works.
+    }
+  }
+
+  function restoreRecommendation() {
+    const key = recommendationStorageKey();
+    if (!key) return null;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(key) || 'null');
+      return stored && Array.isArray(stored.tasks) ? stored : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function showToast(message) {
     toast.textContent = message;
     toast.classList.add('is-visible');
@@ -451,8 +476,10 @@
       ? state.recommendation.tasks
       : [];
     const recommendedItems = buildRecommendedItems(items, recommendedTasks);
+    const recommendedItemIds = new Set(recommendedItems.map((item) => item.id));
+    const additionalPlanItems = items.filter((item) => !recommendedItemIds.has(item.id));
     const displayItems = recommendedItems.length > 0
-      ? [...recommendedItems, ...items.filter((item) => item.kind !== 'task')]
+      ? [...recommendedItems, ...additionalPlanItems]
       : items;
     const formatTime = (value) => {
       if (!value) return '--:--';
@@ -639,6 +666,7 @@
       }
       const restored = await api.restoreSession(storedSessionId);
       state.sessionId = restored.session_id;
+      state.recommendation = restoreRecommendation();
       hydratePreferences(restored.preferences || {});
       const initialDestination = flow.resumeDestination({
         preferences: restored.preferences || {},
@@ -761,6 +789,7 @@
     });
     state.plan = generated.plan;
     state.recommendation = generated.recommendation || null;
+    persistRecommendation(state.recommendation);
     state.step = 'result';
   }
 
