@@ -21,8 +21,8 @@ test('formal frontend exposes the pixel visual shell', () => {
   assert.match(app, /pixel-plan-layout/);
   assert.match(app, /pixel-plan-hero/);
   assert.match(app, /pixel-companion-panel/);
-  assert.match(app, /recommended-task-list/);
-  assert.match(app, /recommendedTasks\.length/);
+  assert.match(app, /recommendedItems/);
+  assert.match(app, /buildRecommendedItems/);
   assert.match(css, /--pixel-paper/);
   assert.match(css, /image-rendering:\s*pixelated/);
   assert.match(css, /\.pixel-plan-layout/);
@@ -38,6 +38,8 @@ test('formal result markup keeps real plan actions inside pixel timeline', () =>
   assert.match(app, /data-action="skip-plan-item"/);
   assert.match(app, /data-action="add-custom-task"/);
   assert.match(app, /data-action="confirm-plan"/);
+  assert.match(app, /data-action="start-execution"/);
+  assert.match(app, /recommended-task-card/);
 });
 
 test('formal frontend shows profile insight before generating the plan', () => {

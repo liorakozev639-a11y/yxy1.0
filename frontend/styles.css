@@ -445,23 +445,12 @@ body.pixel-body {
 .pixel-stat-grid .result-stat { min-height: 112px; box-shadow: 4px 4px 0 var(--pixel-lavender); }
 .pixel-stat-grid .result-stat strong { margin-top: 14px; font-size: 24px; }
 
-.recommended-task-list {
-  margin-top: 22px;
-  padding: 16px;
-  border: 2px solid var(--pixel-line);
-  background: #f8f3dd;
-  box-shadow: 4px 4px 0 var(--pixel-yellow);
-}
-.recommended-task-note { margin: -2px 0 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.recommended-task-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.recommended-task { display: grid; grid-template-columns: 32px 1fr; gap: 8px; align-items: start; padding: 9px; border: 2px solid var(--pixel-line); background: var(--pixel-paper); }
-.recommended-task-index { color: var(--pixel-coral); font-weight: 700; }
-.recommended-task strong, .recommended-task span { display: block; }
-.recommended-task strong { font-size: 13px; line-height: 1.45; }
-.recommended-task span { margin-top: 4px; color: var(--muted); font-size: 11px; }
-
 .pixel-timeline { gap: 14px; margin-top: 20px; }
 .pixel-timeline-item { grid-template-columns: 92px 1fr; min-height: 106px; box-shadow: 4px 4px 0 var(--pixel-lavender); }
+.recommended-task-card { min-height: 150px; }
+.recommended-task-card.is-recommendation-only { border-left: 8px solid var(--pixel-yellow); background: #fffaf0; }
+.recommendation-time-pending { color: var(--pixel-coral) !important; font-weight: 700; }
+.recommendation-status { color: var(--pixel-coral); }
 .pixel-time-index { display: inline-block; margin-right: 8px; color: var(--pixel-coral); font-weight: 700; }
 .pixel-task-content strong { font-size: 17px; }
 .pixel-task-content span { color: var(--pixel-green-dark); }
@@ -581,7 +570,6 @@ body.pixel-body {
   .pixel-hero-stamp { display: none; }
   .basis-grid { grid-template-columns: 1fr; }
   .pixel-section-label { align-items: flex-start; flex-direction: column; gap: 5px; }
-  .recommended-task-grid { grid-template-columns: 1fr; }
   .pixel-timeline-item { grid-template-columns: 76px 1fr; }
   .pixel-task-header { flex-direction: column; }
   .pixel-result-actions .actions-right { flex-wrap: wrap; }

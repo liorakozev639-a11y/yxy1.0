@@ -257,6 +257,7 @@
       active: '进行中',
       completed: '已完成',
       skipped: '已跳过',
+      recommended: '推荐候选',
       missed: '已错过',
       overdue: '已超时',
       needs_adjustment: '需要调整',
@@ -366,6 +367,9 @@
   }
 
   function executionActions(item, plan) {
+    if (item.recommendationOnly) {
+      return '<span class="execution-status recommendation-status">待安排到当前时间线</span>';
+    }
     const disabled = state.busy ? 'disabled' : '';
     if (item.status === 'pending') {
       return `<button class="button primary compact" data-action="start-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>开始任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>${energyPanel(item)}`;
@@ -382,6 +386,63 @@
     return `<span class="execution-status">${executionStatusLabel(item.status)}</span>`;
   }
 
+  function buildRecommendedItems(items, recommendedTasks) {
+    const scheduledByTaskId = new Map(
+      items
+        .filter((item) => item.kind === 'task' && item.task_id)
+        .map((item) => [item.task_id, item]),
+    );
+    return recommendedTasks.map((task, index) => {
+      const scheduled = scheduledByTaskId.get(task.id);
+      if (scheduled) {
+        return {
+          ...task,
+          ...scheduled,
+          recommendationIndex: index,
+          recommendationOnly: false,
+        };
+      }
+      return {
+        ...task,
+        id: `recommendation-${task.id}`,
+        task_id: task.id,
+        kind: 'task',
+        status: 'recommended',
+        start_at: null,
+        end_at: null,
+        recommendationIndex: index,
+        recommendationOnly: true,
+      };
+    });
+  }
+
+  function renderTaskCard(item, index, plan, formatTime) {
+    const isScheduled = !item.recommendationOnly;
+    const status = item.status || 'pending';
+    const time = isScheduled
+      ? `${formatTime(item.start_at)}<br>${formatTime(item.end_at)}`
+      : '<span class="recommendation-time-pending">待安排</span>';
+    const replaceButton = isScheduled && item.kind === 'task' && status !== 'skipped'
+      ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>`
+      : '';
+    const detailButton = `<button class="button ghost compact" data-action="open-detail" data-item-id="${escapeHtml(item.id)}">详情</button>`;
+    const editButton = isScheduled
+      ? `<button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${status === 'skipped' ? 'disabled' : ''}>调整时间</button>`
+      : '';
+    const skipButton = isScheduled && (status === 'pending' || status === 'active')
+      ? `<button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}">编辑跳过</button>`
+      : '';
+    return `<article class="timeline-item pixel-timeline-item recommended-task-card status-${escapeHtml(status)} ${item.recommendationOnly ? 'is-recommendation-only' : ''} ${status === 'skipped' ? 'is-skipped' : ''}">
+      <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${time}</div>
+      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${reasonTags(item)}<div class="timeline-actions">
+        ${executionActions(item, plan)}
+        ${detailButton}
+        ${editButton}
+        ${skipButton}
+      </div>${feedbackPanel(item)}</div>
+    </article>`;
+  }
+
   function renderResult() {
     const result = state.result || {};
     const plan = state.plan || {};
@@ -389,6 +450,10 @@
     const recommendedTasks = state.recommendation && Array.isArray(state.recommendation.tasks)
       ? state.recommendation.tasks
       : [];
+    const recommendedItems = buildRecommendedItems(items, recommendedTasks);
+    const displayItems = recommendedItems.length > 0
+      ? [...recommendedItems, ...items.filter((item) => item.kind !== 'task')]
+      : items;
     const formatTime = (value) => {
       if (!value) return '--:--';
       return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -412,16 +477,7 @@
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
           ${executionReminder()}
-          ${recommendedTasks.length > 0 ? `<section class="recommended-task-list"><div class="pixel-section-label"><strong>本次推荐任务</strong><span>${recommendedTasks.length} 个</span></div><p class="recommended-task-note">这些任务来自你的问卷偏好；时间线会优先安排当前空闲时段能够放下的任务。</p><div class="recommended-task-grid">${recommendedTasks.map((task, index) => `<article class="recommended-task"><span class="recommended-task-index">${String(index + 1).padStart(2, '0')}</span><div><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.category)} · ${escapeHtml(task.duration)} 分钟 · ${escapeHtml(task.budget)} 元以内</span></div></article>`).join('')}</div></section>` : ''}
-          ${state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${items.map((item, index) => `<article class="timeline-item pixel-timeline-item status-${escapeHtml(item.status || 'pending')} ${item.status === 'skipped' ? 'is-skipped' : ''}">
-            <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${formatTime(item.start_at)}<br>${formatTime(item.end_at)}</div>
-            <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(item.status)}</span></div>${item.kind === 'task' && item.status !== 'skipped' ? `<button class="button secondary compact" data-action="replace-plan-item" data-item-id="${escapeHtml(item.id)}" ${state.busy ? 'disabled' : ''}>换一个</button>` : ''}</div>${reasonTags(item)}<div class="timeline-actions">
-              ${executionActions(item, plan)}
-              <button class="button ghost compact" data-action="open-detail" data-item-id="${escapeHtml(item.id)}">详情</button>
-              <button class="button ghost compact" data-action="edit-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>调整时间</button>
-              ${item.status === 'pending' || item.status === 'active' ? `<button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}" ${item.status === 'skipped' ? 'disabled' : ''}>编辑跳过</button>` : ''}
-            </div>${feedbackPanel(item)}</div>
-          </article>`).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>`}
+          ${state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${displayItems.map((item, index) => renderTaskCard(item, index, plan, formatTime)).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>`}
           ${state.review && !state.showingReview ? '<button class="button secondary" data-action="view-review">查看本次复盘</button>' : ''}
           <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
           <div class="actions pixel-result-actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已按流程执行' : '按此流程执行'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
@@ -435,7 +491,7 @@
           <div class="pixel-status-note"><span class="pixel-dot"></span>${plan.status === 'confirmed' ? '已按当前流程执行' : '计划草稿，可继续调整'}</div>
         </aside>
       </div>
-      ${reasonModal(items)}
+      ${reasonModal([...items, ...recommendedItems])}
     </section>`;
   }
 
