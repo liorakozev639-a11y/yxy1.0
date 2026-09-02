@@ -126,6 +126,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 - **数据库**：PostgreSQL，保存会话、偏好、问卷、答案、画像、计划、计划项、执行事件、网页交付与反馈。
 - **业务编排**：`mvp_orchestrator.py` 连接 Session、Questionnaire、Profile、Task Repository、Recommendation、Scheduling、Delivery 等模块。
 - **计划版本控制**：Plan 模块每次变更计划都会递增版本号，前端必须携带当前版本号提交更新。
+- **健康检查**：`GET /health` 检查后端，`GET /api/v1/health/database` 使用只读查询检查 PostgreSQL；前端会在启动恢复时调用两者并显示可操作的中文错误提示。
 - **接口文档**：FastAPI 自动生成 Swagger，运行后访问 `http://127.0.0.1:8000/docs`；静态说明见 `docs/api.md`。
 
 ## 数据与 MVP 边界
@@ -192,6 +193,15 @@ Set-Location "D:\yxy1.0"
 ```
 
 打开 `http://127.0.0.1:8000/docs`，应看到 Session、Questionnaire、Profile、Plan、Execution 和 Feedback 接口。
+
+也可以先检查服务状态：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/health/database
+```
+
+两个接口都返回 `data.status` 为 `ok` 后，再打开前端页面。数据库未连接时，前端会提示检查 PostgreSQL；后端未启动时，前端会提示先启动后端。
 
 如果提示 `8000` 被占用，先在 PyCharm 停止旧的 `session_module.py` 调试进程，再启动 `main.py`。
 

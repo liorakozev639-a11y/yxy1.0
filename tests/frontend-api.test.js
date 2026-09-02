@@ -114,6 +114,39 @@ test('API errors preserve status and backend message', async () => {
   );
 });
 
+test('health methods expose API and database status endpoints', async () => {
+  const calls = [];
+  const api = createApi({
+    storage: createStorage(),
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ data: { status: 'ok' }, error: null });
+    },
+  });
+
+  await api.getHealth();
+  await api.getDatabaseHealth();
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/health');
+  assert.equal(calls[1].url, 'http://127.0.0.1:8000/api/v1/health/database');
+  assert.deepEqual(calls.map((call) => call.options.method), ['GET', 'GET']);
+});
+
+test('network failures become actionable Chinese messages', async () => {
+  const api = createApi({
+    storage: createStorage(),
+    fetchImpl: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  });
+
+  await assert.rejects(
+    api.getHealth(),
+    (error) => error.code === 'service_unreachable'
+      && error.message === '本地后端服务未启动，请先启动后端',
+  );
+});
+
 test('ensureAnonymousUser creates and persists the anonymous user id', async () => {
   const calls = [];
   const storage = createStorage();

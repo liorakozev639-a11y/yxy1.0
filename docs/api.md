@@ -13,6 +13,20 @@ Swagger：`http://127.0.0.1:8000/docs`
 }
 ```
 
+## Health
+
+### 检查后端服务
+
+`GET /health`
+
+后端正常时返回 `data.status = "ok"`。该接口不访问数据库，用于判断 API 服务是否已启动。
+
+### 检查 PostgreSQL
+
+`GET /api/v1/health/database`
+
+后端会执行一次只读的 `SELECT 1`。数据库正常时返回 `data.status = "ok"`；未配置或无法连接时返回 `503`，错误码为 `database_unavailable`。
+
 ## Session
 
 ### 创建会话

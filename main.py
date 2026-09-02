@@ -326,6 +326,22 @@ def create_app(
             },
         )
 
+    @app.get("/health")
+    def health() -> dict[str, Any]:
+        return success({"status": "ok", "service": "api"})
+
+    @app.get("/api/v1/health/database")
+    def database_health() -> dict[str, Any]:
+        database_url = os.getenv("SESSION_DATABASE_URL")
+        if not database_url:
+            raise HTTPException(status_code=503, detail="数据库配置缺失")
+        try:
+            with psycopg.connect(database_url) as connection:
+                connection.execute("SELECT 1")
+        except psycopg.Error as exc:
+            raise HTTPException(status_code=503, detail="数据库暂时不可用") from exc
+        return success({"status": "ok", "service": "postgresql"})
+
     @app.post("/api/v1/sessions", status_code=201)
     def create_session() -> dict[str, Any]:
         return success(session_service.create())

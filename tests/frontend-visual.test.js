@@ -13,10 +13,10 @@ test('formal frontend exposes the pixel visual shell', () => {
 
   assert.match(index, /class="site-header pixel-header"/);
   assert.match(index, /class="app-shell pixel-app-shell"/);
-  assert.match(index, /styles\.css\?v=pixel-v4/);
-  assert.match(index, /api\.js\?v=pixel-v4/);
-  assert.match(index, /flow\.js\?v=pixel-v4/);
-  assert.match(index, /app\.js\?v=pixel-v4/);
+  assert.match(index, /styles\.css\?v=pixel-v5/);
+  assert.match(index, /api\.js\?v=pixel-v5/);
+  assert.match(index, /flow\.js\?v=pixel-v5/);
+  assert.match(index, /app\.js\?v=pixel-v5/);
   assert.match(app, /class="screen pixel-screen/);
   assert.match(app, /pixel-plan-layout/);
   assert.match(app, /pixel-plan-hero/);
@@ -25,6 +25,8 @@ test('formal frontend exposes the pixel visual shell', () => {
   assert.match(app, /buildRecommendedItems/);
   assert.match(app, /persistRecommendation/);
   assert.match(app, /restoreRecommendation/);
+  assert.match(app, /getHealth/);
+  assert.match(app, /getDatabaseHealth/);
   assert.match(css, /--pixel-paper/);
   assert.match(css, /image-rendering:\s*pixelated/);
   assert.match(css, /\.pixel-plan-layout/);

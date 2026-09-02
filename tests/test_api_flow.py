@@ -137,6 +137,15 @@ class ApiFlowTests(unittest.TestCase):
         self.assertEqual(response.json()["error"]["code"], "session_not_found")
         self.assertEqual(response.json()["error"]["message"], "会话不存在")
 
+    def test_health_endpoints_report_api_and_database(self) -> None:
+        api_health = self.client.get("/health")
+        self.assertEqual(api_health.status_code, 200)
+        self.assertEqual(api_health.json()["data"]["status"], "ok")
+
+        database_health = self.client.get("/api/v1/health/database")
+        self.assertEqual(database_health.status_code, 200)
+        self.assertEqual(database_health.json()["data"]["status"], "ok")
+
     def test_cors_allows_only_local_frontend_origins(self) -> None:
         headers = {
             "Origin": "http://127.0.0.1:5173",

@@ -39,11 +39,16 @@
     async function request(path, { method = 'GET', body } = {}) {
       const headers = {};
       if (body !== undefined) headers['Content-Type'] = 'application/json';
-      const response = await fetchImpl(`${apiBase}${path}`, {
-        method,
-        headers,
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      });
+      let response;
+      try {
+        response = await fetchImpl(`${apiBase}${path}`, {
+          method,
+          headers,
+          ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        });
+      } catch (_) {
+        throw new ApiError('本地后端服务未启动，请先启动后端', 0, 'service_unreachable');
+      }
       let payload;
       try {
         payload = await response.json();
@@ -52,14 +57,25 @@
       }
       if (!response.ok || payload.error) {
         const error = payload.error || {};
+        const messages = {
+          database_unavailable: 'PostgreSQL 数据库未连接，请检查数据库服务',
+        };
         throw new ApiError(
-          error.message || `请求失败（${response.status}）`,
+          messages[error.code] || error.message || `请求失败（${response.status}）`,
           response.status,
           error.code || 'request_failed',
           error.details,
         );
       }
       return payload.data;
+    }
+
+    function getHealth() {
+      return request('/health');
+    }
+
+    function getDatabaseHealth() {
+      return request('/api/v1/health/database');
     }
 
     function getSessionId() {
@@ -298,6 +314,8 @@
       ensureAnonymousUser,
       forgetSession,
       getFeedback,
+      getHealth,
+      getDatabaseHealth,
       getReview,
       getProgress,
       getPlan,

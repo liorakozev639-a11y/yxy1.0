@@ -665,6 +665,8 @@
     state.error = '';
     render();
     try {
+      await api.getHealth();
+      await api.getDatabaseHealth();
       try {
         const user = await api.ensureAnonymousUser();
         state.userId = user.user_id || null;
