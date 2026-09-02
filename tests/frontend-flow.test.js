@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   firstUnansweredIndex,
+  mergeRecommendedItems,
   recoverInitialization,
   recommendationMemorySummary,
   taskReasonSummary,
@@ -105,4 +106,26 @@ test('recommendationMemorySummary gives users a readable exclusion count', () =>
   assert.equal(recommendationMemorySummary({ excluded_group_count: 2 }), '已为你避开 2 组不喜欢的任务');
   assert.equal(recommendationMemorySummary({ excluded_group_count: 0 }), '');
   assert.equal(recommendationMemorySummary(null), '');
+});
+
+test('mergeRecommendedItems replaces stale recommendation cards after a task replacement', () => {
+  const items = [{
+    id: 'item_new',
+    task_id: 'task_new',
+    title: '新的任务',
+    category: '活力充电',
+    kind: 'task',
+    status: 'pending',
+    replacement_history: ['task_old', 'task_new'],
+  }];
+  const recommendations = [
+    { id: 'task_old', title: '旧任务', category: '活力充电' },
+    { id: 'task_other', title: '其他任务', category: '活力充电' },
+  ];
+
+  const merged = mergeRecommendedItems(items, recommendations);
+
+  assert.equal(merged[0].task_id, 'task_new');
+  assert.equal(merged[0].recommendationOnly, false);
+  assert.equal(merged.some((item) => item.task_id === 'task_old'), false);
 });

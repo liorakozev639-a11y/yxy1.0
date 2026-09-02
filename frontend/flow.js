@@ -73,9 +73,56 @@
     return `已为你避开 ${count} 组不喜欢的任务`;
   }
 
+  function mergeRecommendedItems(items, recommendedTasks) {
+    const planItems = Array.isArray(items) ? items : [];
+    const scheduledByTaskId = new Map(
+      planItems
+        .filter((item) => item.kind === 'task' && item.task_id)
+        .map((item) => [item.task_id, item]),
+    );
+    const replacementByPreviousTaskId = new Map();
+    planItems
+      .filter((item) => item.kind === 'task' && item.task_id)
+      .forEach((item) => {
+        const history = Array.isArray(item.replacement_history)
+          ? item.replacement_history
+          : [];
+        history.forEach((taskId) => {
+          if (taskId !== item.task_id) {
+            replacementByPreviousTaskId.set(taskId, item);
+          }
+        });
+      });
+
+    return (Array.isArray(recommendedTasks) ? recommendedTasks : []).flatMap((task, index) => {
+      const scheduled = scheduledByTaskId.get(task.id);
+      const replacement = scheduled || replacementByPreviousTaskId.get(task.id);
+      if (replacement) {
+        return [{
+          ...task,
+          ...replacement,
+          recommendationIndex: index,
+          recommendationOnly: false,
+        }];
+      }
+      return [{
+        ...task,
+        id: `recommendation-${task.id}`,
+        task_id: task.id,
+        kind: 'task',
+        status: 'recommended',
+        start_at: null,
+        end_at: null,
+        recommendationIndex: index,
+        recommendationOnly: true,
+      }];
+    });
+  }
+
   return {
     firstUnansweredIndex,
     recommendationMemorySummary,
+    mergeRecommendedItems,
     recoverInitialization,
     resumeDestination,
     taskReasonSummary,

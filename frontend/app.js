@@ -424,33 +424,7 @@
   }
 
   function buildRecommendedItems(items, recommendedTasks) {
-    const scheduledByTaskId = new Map(
-      items
-        .filter((item) => item.kind === 'task' && item.task_id)
-        .map((item) => [item.task_id, item]),
-    );
-    return recommendedTasks.map((task, index) => {
-      const scheduled = scheduledByTaskId.get(task.id);
-      if (scheduled) {
-        return {
-          ...task,
-          ...scheduled,
-          recommendationIndex: index,
-          recommendationOnly: false,
-        };
-      }
-      return {
-        ...task,
-        id: `recommendation-${task.id}`,
-        task_id: task.id,
-        kind: 'task',
-        status: 'recommended',
-        start_at: null,
-        end_at: null,
-        recommendationIndex: index,
-        recommendationOnly: true,
-      };
-    });
+    return window.FreeTimeFlow.mergeRecommendedItems(items, recommendedTasks);
   }
 
   function renderTaskCard(item, index, plan, formatTime) {
