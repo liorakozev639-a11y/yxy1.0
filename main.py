@@ -91,6 +91,26 @@ class PlanReplaceInput(PlanItemMutationInput):
     replacement_task_id: Optional[str] = Field(default=None, max_length=128)
 
 
+AdjustmentIntent = Literal[
+    "easier",
+    "shorter",
+    "cheaper",
+    "nearer",
+    "less_social",
+    "more_growth",
+]
+
+
+class PlanAdjustInput(PlanItemMutationInput):
+    adjustment: AdjustmentIntent
+
+
+class RecommendationAdjustInput(BaseModel):
+    adjustment: AdjustmentIntent
+    current_task_ids: list[str] = Field(default_factory=list, max_length=100)
+    user_id: Optional[str] = None
+
+
 class CustomTaskInput(BaseModel):
     expected_version: int = Field(ge=1)
     title: str = Field(min_length=1, max_length=128)
@@ -510,6 +530,42 @@ def create_app(
                 item_id,
                 body.expected_version,
                 body.replacement_task_id,
+                body.user_id,
+            )
+        )
+
+    @app.post("/api/v1/plans/{plan_id}/items/{item_id}/adjust")
+    def adjust_plan_item(
+        plan_id: str,
+        item_id: str,
+        body: PlanAdjustInput,
+    ) -> dict[str, Any]:
+        manager = require_plan_service()
+        session_id = _session_id_from_plan(manager, plan_id)
+        return success(
+            manager.adjust_item(
+                session_id,
+                plan_id,
+                item_id,
+                body.expected_version,
+                body.adjustment,
+                body.user_id,
+            )
+        )
+
+    @app.post("/api/v1/sessions/{session_id}/recommendations/{task_id}/adjust")
+    def adjust_recommendation_task(
+        session_id: str,
+        task_id: str,
+        body: RecommendationAdjustInput,
+    ) -> dict[str, Any]:
+        orchestrator_service = require_orchestrator()
+        return success(
+            orchestrator_service.adjust_recommendation(
+                session_id,
+                task_id,
+                body.adjustment,
+                body.current_task_ids,
                 body.user_id,
             )
         )

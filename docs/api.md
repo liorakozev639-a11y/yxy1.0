@@ -89,6 +89,75 @@ Swagger：`http://127.0.0.1:8000/docs`
 
 返回 `plan_id`、版本、时间范围、任务数组和未安排任务 ID。
 
+## Recommendation Adjustment
+
+推荐调节用于正式像素前端的任务卡片按钮。它不需要 Token；后端通过当前 `session_id`、`plan_id` 和计划版本校验请求。
+
+### 调节计划内任务
+
+`POST /api/v1/plans/{plan_id}/items/{item_id}/adjust`
+
+```json
+{
+  "expected_version": 3,
+  "adjustment": "easier",
+  "user_id": "user_xxx"
+}
+```
+
+`adjustment` 可选值：
+
+| 值 | 前端按钮 | 选择逻辑 |
+| --- | --- | --- |
+| `easier` | 更轻松 | 优先轻松度更高、体力或社交压力更低的同分类任务。 |
+| `shorter` | 更短时间 | 只选择时长更短的同分类任务。 |
+| `cheaper` | 更低预算 | 只选择预算更低的同分类任务。 |
+| `nearer` | 更近/居家 | 只选择出行或地点依赖更近的同分类任务。 |
+| `less_social` | 少社交 | 只选择社交压力更低或更适合独处的同分类任务。 |
+| `more_growth` | 成长感 | 在自我成长分类内选择更偏学习、阅读、练习、记录或复盘的任务。 |
+
+成功时返回新的完整计划版本。后端会先把原任务加入当前会话的任务 ID 排除池，再保存新计划版本，因此连续调节不会回到已经出现过的任务。
+
+### 调节推荐池任务
+
+`POST /api/v1/sessions/{session_id}/recommendations/{task_id}/adjust`
+
+```json
+{
+  "adjustment": "shorter",
+  "current_task_ids": ["task_calm_01", "task_calm_07", "task_energy_03"],
+  "user_id": "user_xxx"
+}
+```
+
+`current_task_ids` 是前端当前已经展示在推荐池或计划里的任务 ID。后端会同时排除：
+
+- 当前被调节的任务。
+- 当前页面已经展示的任务。
+- 当前会话中以前被换掉或调节过的任务。
+- 当前会话中低分或跳过后排除的任务组。
+
+成功响应：
+
+```json
+{
+  "task": {
+    "id": "task_calm_11",
+    "title": "整理一角桌面并播放轻音乐",
+    "category": "松弛疗愈",
+    "reason_text": "你选择了「松弛疗愈」...",
+    "replacement_reason": "已按「更短时间」避开「原任务」，换成同属松弛疗愈且本会话未出现过的任务。"
+  },
+  "recommendation_memory": {
+    "excluded_group_count": 0,
+    "excluded_task_count": 3,
+    "adjustment_excluded_task_count": 2
+  }
+}
+```
+
+如果没有满足当前按钮意图和硬约束的新任务，返回 `409`，提示 `当前没有更合适的任务`；前端会保留原任务。
+
 ## Execution Loop
 
 计划生成并确认后，前端按任务状态调用执行接口。执行接口不需要登录令牌；服务端通过 `plan_id`、任务归属和会话有效期校验请求。

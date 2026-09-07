@@ -483,6 +483,32 @@ body.pixel-body {
 }
 .task-load-summary small { color: var(--muted); font-size: 10px; }
 .task-load-summary b { margin-top: 4px; color: var(--pixel-green-dark); font-size: 11px; }
+.adjustment-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.adjustment-button {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 2px solid var(--pixel-line);
+  border-radius: 0;
+  background: #f7fff9;
+  color: var(--pixel-green-dark);
+  box-shadow: 2px 2px 0 var(--pixel-lavender);
+  cursor: pointer;
+  font: 700 12px "Courier New", "Noto Sans SC", "Microsoft YaHei", monospace;
+}
+.adjustment-button:hover:not(:disabled),
+.adjustment-button:focus-visible {
+  background: var(--pixel-yellow);
+  transform: translate(-1px, -1px);
+}
+.adjustment-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 .detail-dialog {
   border: 2px solid var(--pixel-line);
   border-radius: 0;

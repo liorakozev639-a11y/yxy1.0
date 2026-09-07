@@ -14,12 +14,14 @@ from psycopg.types.json import Jsonb
 
 from mvp_orchestrator import GeneratePlanRequest
 from recommendation_module import (
+    build_adjustment_reason,
     build_load_profile,
     build_matched_preferences,
     build_reason_tags,
     build_reason_text,
     build_warning_text,
     calculate_match_score,
+    select_adjusted_task,
 )
 from task_repository import CATEGORIES, Task, TaskRepository
 
@@ -251,6 +253,11 @@ class PlanManagementService:
         if self.user_history is not None:
             excluded |= self.user_history.excluded_groups(user_id)
         return excluded
+
+    def _replacement_excluded_task_ids(self, session_id: str) -> set[str]:
+        if self.memory is None:
+            return set()
+        return self.memory.list_excluded_task_ids(session_id)
 
     def init_schema(self) -> None:
         with self._connect() as connection:
@@ -493,6 +500,9 @@ class PlanManagementService:
             if item["task_id"]
         }
         used_ids.update(normalize_replacement_history(current.get("replacement_history")))
+        if self.memory is not None and current.get("task_id"):
+            self.memory.record_task_adjustment(session_id, current["task_id"], "replace")
+        used_ids.update(self._replacement_excluded_task_ids(session_id))
         candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
         candidate = select_replacement_task(
             candidates=candidates,
@@ -523,6 +533,77 @@ class PlanManagementService:
         self._record_replacement_history(user_id, session_id, plan_id, item_id, saved, candidate.id)
         return saved
 
+    def adjust_item(
+        self,
+        session_id: str,
+        plan_id: str,
+        item_id: str,
+        expected_version: int,
+        adjustment: str,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        plan = self._require(session_id, plan_id)
+        self._check_version(plan, expected_version)
+        current = self._find_item(plan, item_id)
+        if current["kind"] != "task":
+            raise HTTPException(status_code=400, detail="只能调节任务项")
+        session = self.sessions.require_active(session_id)
+        current_task = next(
+            (task for task in self.tasks.public_tasks if task.id == current["task_id"]),
+            None,
+        )
+        if current_task is None:
+            raise HTTPException(status_code=404, detail="当前任务不存在")
+
+        if self.memory is not None and current.get("task_id"):
+            self.memory.record_task_adjustment(session_id, current["task_id"], adjustment)
+
+        budget_limit = {"low": 20, "medium": 40, "high": 80}.get(session.preferences.get("budget"), 40)
+        max_duration = {"half": 270, "day": 480}.get(session.preferences.get("duration"), 270)
+        constraints = {
+            "budget_limit": budget_limit,
+            "max_duration": max_duration,
+            "outing": session.preferences.get("outing", "any"),
+            "company": session.preferences.get("company", "both"),
+        }
+        used_ids = {
+            item["task_id"]
+            for item in plan["items"]
+            if item["task_id"]
+        }
+        used_ids.update(normalize_replacement_history(current.get("replacement_history")))
+        used_ids.update(self._replacement_excluded_task_ids(session_id))
+        candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+        candidate = select_adjusted_task(
+            candidates=candidates,
+            current_task=current_task,
+            adjustment=adjustment,
+            used_task_ids=used_ids,
+            constraints=constraints,
+            excluded_feedback_groups=self._replacement_excluded_groups(session_id, user_id),
+        )
+        if candidate is None:
+            raise HTTPException(status_code=409, detail="当前没有更合适的任务")
+
+        start = self._parse_time(current["start_at"])
+        end = self._parse_time(current["end_at"])
+        self._ensure_slot(plan, start, end, item_id)
+        adjustment_reason = build_adjustment_reason(current_task, candidate, adjustment)
+        items = [dict(item) for item in plan["items"]]
+        for item in items:
+            if item["id"] == item_id:
+                item.update(build_replaced_item(item, candidate))
+        saved = self._save_version(plan, items)
+        if self.memory is not None:
+            saved["recommendation_memory"] = self.memory.summary(session_id)
+        for item in saved["items"]:
+            if item.get("task_id") == candidate.id:
+                item["adjustment_reason"] = adjustment_reason
+                item["replacement_reason"] = adjustment_reason
+                break
+        self._record_replacement_history(user_id, session_id, plan_id, item_id, saved, candidate.id)
+        return saved
+
     def replace_item_easier(
         self,
         session_id: str,
@@ -538,6 +619,9 @@ class PlanManagementService:
             raise HTTPException(status_code=400, detail="只能替换任务项")
         used_ids = {item["task_id"] for item in plan["items"] if item["task_id"]}
         used_ids.update(normalize_replacement_history(current.get("replacement_history")))
+        if self.memory is not None and current.get("task_id"):
+            self.memory.record_task_adjustment(session_id, current["task_id"], "easier")
+        used_ids.update(self._replacement_excluded_task_ids(session_id))
         candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
         candidate = select_easier_replacement_task(
             candidates=candidates,

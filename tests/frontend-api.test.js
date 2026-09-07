@@ -97,6 +97,45 @@ test('recommended task methods add a task to an existing plan', async () => {
   assert.deepEqual(JSON.parse(calls[0].options.body), { expected_version: 1 });
 });
 
+test('adjustment methods send intent and current recommendation pool', async () => {
+  const calls = [];
+  const storage = createStorage();
+  storage.setItem(STORAGE_KEY, 'sess_test');
+  const api = createApi({
+    storage,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ data: { ok: true }, error: null });
+    },
+  });
+
+  await api.adjustPlanItem('plan_1', 'item_1', {
+    expected_version: 3,
+    adjustment: 'shorter',
+    user_id: 'user_1',
+  });
+  await api.adjustRecommendationTask('task_old', {
+    adjustment: 'easier',
+    current_task_ids: ['task_old', 'task_seen'],
+    user_id: 'user_1',
+  });
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/adjust');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    expected_version: 3,
+    adjustment: 'shorter',
+    user_id: 'user_1',
+  });
+  assert.equal(calls[1].url, 'http://127.0.0.1:8000/api/v1/sessions/sess_test/recommendations/task_old/adjust');
+  assert.equal(calls[1].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    adjustment: 'easier',
+    current_task_ids: ['task_old', 'task_seen'],
+    user_id: 'user_1',
+  });
+});
+
 test('API errors preserve status and backend message', async () => {
   const api = createApi({
     storage: createStorage(),

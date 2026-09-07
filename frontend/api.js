@@ -189,6 +189,21 @@
       });
     }
 
+    function adjustPlanItem(planId, itemId, input) {
+      return request(`/api/v1/plans/${planId}/items/${itemId}/adjust`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
+    function adjustRecommendationTask(taskId, input, sessionId) {
+      const current = requireSessionId(sessionId);
+      return request(`/api/v1/sessions/${current}/recommendations/${taskId}/adjust`, {
+        method: 'POST',
+        body: input,
+      });
+    }
+
     function skipPlanItem(planId, itemId, input) {
       return request(`/api/v1/plans/${planId}/items/${itemId}/skip`, {
         method: 'POST',
@@ -303,6 +318,8 @@
     }
 
     return {
+      adjustPlanItem,
+      adjustRecommendationTask,
       clearSession,
       addCustomTask,
       addRecommendedTask,

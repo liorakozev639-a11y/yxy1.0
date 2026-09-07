@@ -65,6 +65,24 @@ class RecommendationMemory:
                 ON session_task_exclusions(session_id, created_at)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS session_adjusted_task_exclusions (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    task_id TEXT NOT NULL,
+                    adjustment TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL,
+                    UNIQUE (session_id, task_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_session_adjusted_task_exclusions_session
+                ON session_adjusted_task_exclusions(session_id, created_at)
+                """
+            )
 
     def record_plan_item_exclusion(
         self,
@@ -119,15 +137,60 @@ class RecommendationMemory:
             ).fetchall()
         return {row[0] for row in rows}
 
+    def record_task_adjustment(
+        self,
+        session_id: str,
+        task_id: str,
+        adjustment: str,
+    ) -> dict[str, Any]:
+        self.sessions.require_active(session_id)
+        now = utc_now()
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                INSERT INTO session_adjusted_task_exclusions
+                    (id, session_id, task_id, adjustment, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (session_id, task_id) DO UPDATE SET
+                    adjustment = EXCLUDED.adjustment
+                RETURNING id, session_id, task_id, adjustment, created_at
+                """,
+                (make_id("adjust"), session_id, task_id, adjustment, now),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("任务调节排除记录保存失败")
+        return {
+            "id": row[0],
+            "session_id": row[1],
+            "task_id": row[2],
+            "adjustment": row[3],
+            "created_at": row[4].isoformat(),
+        }
+
+    def list_excluded_task_ids(self, session_id: str) -> set[str]:
+        self.sessions.require_active(session_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT task_id
+                FROM session_adjusted_task_exclusions
+                WHERE session_id = %s
+                """,
+                (session_id,),
+            ).fetchall()
+        return {row[0] for row in rows}
+
     def summary(self, session_id: str) -> dict[str, int]:
         excluded_groups = self.list_excluded_groups(session_id)
+        adjusted_task_ids = self.list_excluded_task_ids(session_id)
         excluded_task_count = sum(
-            task.feedback_group in excluded_groups
+            task.feedback_group in excluded_groups or task.id in adjusted_task_ids
             for task in self.tasks.public_tasks
         )
         return {
             "excluded_group_count": len(excluded_groups),
             "excluded_task_count": excluded_task_count,
+            "adjustment_excluded_task_count": len(adjusted_task_ids),
         }
 
     def _find_plan_item_task_id(

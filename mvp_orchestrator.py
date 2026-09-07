@@ -16,7 +16,12 @@ from delivery_module import WebDeliveryService
 from profile_module import Answer as ProfileAnswer
 from profile_module import Profile, ProfileService, Question as ProfileQuestion
 from profile_module import build_profile_insight
-from recommendation_module import recommend_tasks
+from recommendation_module import (
+    build_adjustment_reason,
+    enrich_task_reason,
+    recommend_tasks,
+    select_adjusted_task,
+)
 from scheduling_module import PlanDraft, PlanItem as ScheduleItem
 from scheduling_module import Task as ScheduleTask
 from scheduling_module import build_schedule
@@ -468,6 +473,16 @@ class MVPOrchestrator:
             if self.memory is not None
             else set()
         )
+        list_excluded_task_ids = (
+            getattr(self.memory, "list_excluded_task_ids", None)
+            if self.memory is not None
+            else None
+        )
+        excluded_task_ids = (
+            list_excluded_task_ids(profile["session_id"])
+            if callable(list_excluded_task_ids)
+            else set()
+        )
         history_weights = (
             self.user_history.preference_weights(user_id)
             if self.user_history is not None
@@ -484,6 +499,7 @@ class MVPOrchestrator:
             candidates,
             limit=RECOMMENDATION_TASK_LIMIT,
             excluded_feedback_groups=excluded_groups,
+            excluded_task_ids=excluded_task_ids,
             history_weights=history_weights,
             history_excluded_groups=history_excluded_groups,
         )
@@ -491,6 +507,91 @@ class MVPOrchestrator:
         result["recommended_task_count"] = len(result["tasks"])
         result["constraints"] = constraints
         return result
+
+    def adjust_recommendation(
+        self,
+        session_id: str,
+        task_id: str,
+        adjustment: str,
+        current_task_ids: list[str] | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        profile = self._build_profile(session_id)
+        profile_data = asdict(profile)
+        constraints = profile.constraints
+        current_task = next(
+            (
+                task
+                for task in self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+                if task.id == task_id
+            ),
+            None,
+        )
+        if current_task is None:
+            raise HTTPException(status_code=404, detail="推荐任务不存在")
+
+        if self.memory is not None:
+            self.memory.record_task_adjustment(session_id, task_id, adjustment)
+        excluded_task_ids = set(current_task_ids or [])
+        excluded_task_ids.add(task_id)
+        list_excluded_task_ids = (
+            getattr(self.memory, "list_excluded_task_ids", None)
+            if self.memory is not None
+            else None
+        )
+        if callable(list_excluded_task_ids):
+            excluded_task_ids.update(list_excluded_task_ids(session_id))
+        excluded_groups = (
+            self.memory.list_excluded_groups(session_id)
+            if self.memory is not None
+            else set()
+        )
+        if self.user_history is not None:
+            excluded_groups |= self.user_history.excluded_groups(user_id)
+
+        candidates = self.tasks.search_tasks(
+            session_id=session_id,
+            budget_limit=constraints["budget_limit"],
+            max_duration=constraints["max_duration"],
+            outing=constraints["outing"],
+            company=constraints["company"],
+            categories=[current_task.category],
+            scenarios=constraints.get("scenarios"),
+        )
+        candidate = select_adjusted_task(
+            candidates=candidates,
+            current_task=current_task,
+            adjustment=adjustment,
+            used_task_ids=excluded_task_ids,
+            constraints=constraints,
+            excluded_feedback_groups=excluded_groups,
+        )
+        if candidate is None:
+            raise HTTPException(status_code=409, detail="当前没有更合适的任务")
+
+        task_payload = enrich_task_reason(
+            candidate,
+            constraints,
+            profile_data["scores"].get(candidate.category, 0),
+        )
+        task_payload["adjustment_reason"] = build_adjustment_reason(
+            current_task,
+            candidate,
+            adjustment,
+        )
+        task_payload["replacement_reason"] = task_payload["adjustment_reason"]
+        return {
+            "task": task_payload,
+            "recommendation_memory": (
+                self.memory.summary(session_id)
+                if self.memory is not None
+                else {
+                    "excluded_group_count": 0,
+                    "excluded_task_count": 0,
+                    "adjustment_excluded_task_count": 0,
+                }
+            ),
+        }
 
     @staticmethod
     def _normalize_preferences(preferences: dict[str, Any]) -> dict[str, Any]:

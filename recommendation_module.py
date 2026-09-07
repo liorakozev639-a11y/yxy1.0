@@ -1,10 +1,29 @@
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
 try:
     from task_repository import CATEGORIES, Task, TaskRepository
 except ModuleNotFoundError:
     from examples.task_repository import CATEGORIES, Task, TaskRepository
+
+
+AdjustmentIntent = Literal[
+    "easier",
+    "shorter",
+    "cheaper",
+    "nearer",
+    "less_social",
+    "more_growth",
+]
+
+ADJUSTMENT_LABELS: dict[str, str] = {
+    "easier": "更轻松",
+    "shorter": "更短时间",
+    "cheaper": "更低预算",
+    "nearer": "更近/居家",
+    "less_social": "更少社交压力",
+    "more_growth": "更有成长感",
+}
 
 
 def recommend_tasks(
@@ -13,6 +32,7 @@ def recommend_tasks(
     candidates: list[Task],
     limit: int = 10,
     excluded_feedback_groups: set[str] | None = None,
+    excluded_task_ids: set[str] | None = None,
     history_weights: dict[str, Any] | None = None,
     history_excluded_groups: set[str] | None = None,
 ) -> dict[str, Any]:
@@ -25,6 +45,7 @@ def recommend_tasks(
 
     selected_category_set = set(selected_categories)
     session_excluded = excluded_feedback_groups or set()
+    task_excluded = excluded_task_ids or set()
     excluded = session_excluded | (history_excluded_groups or set())
     scores = profile.get("scores", {})
     preference_map = {
@@ -38,6 +59,7 @@ def recommend_tasks(
         for task in candidates
         if task.status == "approved"
         and task.category in selected_category_set
+        and task.id not in task_excluded
         and task.feedback_group not in excluded
     ]
     ranked = sorted(
@@ -107,10 +129,143 @@ def recommend_tasks(
         "recommendation_memory": {
             "excluded_group_count": len(session_excluded),
             "excluded_task_count": sum(
-                task.feedback_group in session_excluded for task in candidates
+                task.feedback_group in session_excluded or task.id in task_excluded
+                for task in candidates
             ),
+            "adjustment_excluded_task_count": len(task_excluded),
         },
     }
+
+
+def select_adjusted_task(
+    *,
+    candidates: list[Task],
+    current_task: Task,
+    adjustment: AdjustmentIntent,
+    used_task_ids: set[str],
+    constraints: dict[str, Any] | None = None,
+    excluded_feedback_groups: set[str] | None = None,
+) -> Task | None:
+    """Choose a same-category task that better matches one adjustment intent."""
+    constraints = constraints or {}
+    excluded = excluded_feedback_groups or set()
+    available = [
+        task
+        for task in candidates
+        if task.status == "approved"
+        and task.category == current_task.category
+        and task.id not in used_task_ids
+        and task.feedback_group not in excluded
+        and _task_matches_hard_constraints(task, constraints)
+        and _task_improves_intent(task, current_task, adjustment)
+    ]
+    return min(
+        available,
+        key=lambda task: _adjustment_sort_key(task, current_task, adjustment),
+        default=None,
+    )
+
+
+def build_adjustment_reason(current_task: Task, replacement: Task, adjustment: str) -> str:
+    label = ADJUSTMENT_LABELS.get(adjustment, "更适合当前状态")
+    return (
+        f"已按「{label}」避开「{current_task.title}」，"
+        f"换成同属{replacement.category}且本会话未出现过的任务。"
+    )
+
+
+def _task_matches_hard_constraints(task: Task, constraints: dict[str, Any]) -> bool:
+    budget_limit = constraints.get("budget_limit")
+    max_duration = constraints.get("max_duration")
+    outing = constraints.get("outing", "any")
+    company = constraints.get("company", "both")
+    if budget_limit is not None and task.budget > int(budget_limit):
+        return False
+    if max_duration is not None and task.duration > int(max_duration):
+        return False
+    if not _matches_outing(task, outing):
+        return False
+    if not _matches_company(task, company):
+        return False
+    return True
+
+
+def _matches_outing(task: Task, outing: str) -> bool:
+    allowed = {
+        "home": {"home"},
+        "nearby": {"home", "nearby"},
+        "city": {"home", "nearby", "city"},
+        "any": {"home", "nearby", "city"},
+    }
+    return task.outing in allowed.get(outing, {"home", "nearby", "city"})
+
+
+def _matches_company(task: Task, company: str) -> bool:
+    return company == "both" or task.company in {company, "both"}
+
+
+def _task_improves_intent(
+    task: Task,
+    current_task: Task,
+    adjustment: AdjustmentIntent,
+) -> bool:
+    if adjustment == "easier":
+        return (
+            task.ease_level > current_task.ease_level
+            or task.physical_load < current_task.physical_load
+            or task.social_pressure < current_task.social_pressure
+        )
+    if adjustment == "shorter":
+        return task.duration < current_task.duration
+    if adjustment == "cheaper":
+        return task.budget < current_task.budget
+    if adjustment == "nearer":
+        return _location_rank(task) < _location_rank(current_task)
+    if adjustment == "less_social":
+        return task.social_pressure < current_task.social_pressure or (
+            task.company == "solo" and current_task.company != "solo"
+        )
+    if adjustment == "more_growth":
+        return current_task.category == "自我成长" and _growth_score(task) > _growth_score(current_task)
+    return False
+
+
+def _adjustment_sort_key(
+    task: Task,
+    current_task: Task,
+    adjustment: AdjustmentIntent,
+) -> tuple[Any, ...]:
+    if adjustment == "easier":
+        return (-task.ease_level, task.physical_load, task.social_pressure, task.duration, task.budget, task.id)
+    if adjustment == "shorter":
+        return (task.duration, task.budget, -task.ease_level, task.id)
+    if adjustment == "cheaper":
+        return (task.budget, task.duration, -task.ease_level, task.id)
+    if adjustment == "nearer":
+        return (_location_rank(task), task.duration, task.budget, task.id)
+    if adjustment == "less_social":
+        return (task.social_pressure, _company_rank(task), task.duration, task.id)
+    if adjustment == "more_growth":
+        return (-_growth_score(task), task.duration, task.budget, task.id)
+    return (task.id,)
+
+
+def _location_rank(task: Task) -> int:
+    outing_rank = {"home": 0, "nearby": 1, "city": 2}
+    dependency_rank = {"home": 0, "flexible": 1, "nearby": 2, "city": 3}
+    return min(
+        outing_rank.get(task.outing, 3),
+        dependency_rank.get(task.location_dependency, 3),
+    )
+
+
+def _company_rank(task: Task) -> int:
+    return {"solo": 0, "both": 1, "group": 2}.get(task.company, 3)
+
+
+def _growth_score(task: Task) -> int:
+    keywords = ("学习", "阅读", "写", "练习", "整理", "复盘", "记录", "课程", "作品")
+    return sum(1 for keyword in keywords if keyword in task.title)
 
 
 def history_score(task: Task, history_weights: dict[str, Any] | None) -> float:
@@ -416,6 +571,7 @@ def build_recommendation(
     repository: TaskRepository,
     limit: int = 10,
     excluded_feedback_groups: set[str] | None = None,
+    excluded_task_ids: set[str] | None = None,
     history_weights: dict[str, Any] | None = None,
     history_excluded_groups: set[str] | None = None,
 ) -> dict[str, Any]:
@@ -437,6 +593,7 @@ def build_recommendation(
         candidates=candidates,
         limit=limit,
         excluded_feedback_groups=excluded_feedback_groups,
+        excluded_task_ids=excluded_task_ids,
         history_weights=history_weights,
         history_excluded_groups=history_excluded_groups,
     )

@@ -10,6 +10,14 @@
     { id: 'explore', name: '乐享探索', description: '美食、娱乐与轻度探索', icon: 'compass' },
     { id: 'growth', name: '自我成长', description: '阅读、学习与兴趣提升', icon: 'sparkles' },
   ];
+  const adjustmentOptions = [
+    ['easier', '更轻松'],
+    ['shorter', '更短时间'],
+    ['cheaper', '更低预算'],
+    ['nearer', '更近/居家'],
+    ['less_social', '少社交'],
+    ['more_growth', '成长感'],
+  ];
 
   function defaultProfile() {
     return {
@@ -427,6 +435,41 @@
     return window.FreeTimeFlow.mergeRecommendedItems(items, recommendedTasks);
   }
 
+  function currentRecommendationTaskIds() {
+    const ids = new Set();
+    if (state.recommendation && Array.isArray(state.recommendation.tasks)) {
+      state.recommendation.tasks.forEach((task) => {
+        if (task.id) ids.add(task.id);
+      });
+    }
+    if (state.plan && Array.isArray(state.plan.items)) {
+      state.plan.items.forEach((item) => {
+        if (item.task_id) ids.add(item.task_id);
+      });
+    }
+    return [...ids];
+  }
+
+  function replaceRecommendationTask(currentTaskId, replacementTask) {
+    if (!state.recommendation || !Array.isArray(state.recommendation.tasks)) return;
+    const nextTasks = state.recommendation.tasks.map((task) => (
+      task.id === currentTaskId ? replacementTask : task
+    ));
+    state.recommendation = {
+      ...state.recommendation,
+      tasks: nextTasks,
+      task_ids: nextTasks.map((task) => task.id).filter(Boolean),
+    };
+    persistRecommendation(state.recommendation);
+  }
+
+  function adjustmentButtons(item) {
+    if (item.kind !== 'task' || item.status === 'skipped') return '';
+    const action = item.recommendationOnly ? 'adjust-recommendation-task' : 'adjust-plan-item';
+    const targetId = item.recommendationOnly ? item.task_id : item.id;
+    return `<div class="adjustment-buttons" aria-label="推荐调节">${adjustmentOptions.map(([value, label]) => `<button class="adjustment-button" data-action="${action}" data-adjustment="${value}" data-item-id="${escapeHtml(targetId)}" ${state.busy ? 'disabled' : ''}>${label}</button>`).join('')}</div>`;
+  }
+
   function renderTaskCard(item, index, plan, formatTime) {
     const isScheduled = !item.recommendationOnly;
     const status = item.status || 'pending';
@@ -445,7 +488,7 @@
       : '';
     return `<article class="timeline-item pixel-timeline-item recommended-task-card status-${escapeHtml(status)} ${item.recommendationOnly ? 'is-recommendation-only' : ''} ${status === 'skipped' ? 'is-skipped' : ''}">
       <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${time}</div>
-      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${reasonTags(item)}${taskLoadSummary(item)}<div class="timeline-actions">
+      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
         ${executionActions(item, plan)}
         ${detailButton}
         ${editButton}
@@ -1018,8 +1061,56 @@
       await runTask(async () => {
         state.plan = await api.replacePlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
+          user_id: state.userId,
         });
         showToast('已更换任务');
+      });
+      return;
+    }
+    if (action === 'adjust-plan-item') {
+      const plan = state.plan;
+      if (!plan) return;
+      await runTask(async () => {
+        try {
+          state.plan = await api.adjustPlanItem(plan.plan_id, control.dataset.itemId, {
+            expected_version: plan.version,
+            adjustment: control.dataset.adjustment,
+            user_id: state.userId,
+          });
+          showToast('已按你的偏好换成新任务');
+        } catch (error) {
+          if (error.status === 409) {
+            showToast('当前没有更合适的任务');
+            return;
+          }
+          throw error;
+        }
+      });
+      return;
+    }
+    if (action === 'adjust-recommendation-task') {
+      await runTask(async () => {
+        try {
+          const result = await api.adjustRecommendationTask(control.dataset.itemId, {
+            adjustment: control.dataset.adjustment,
+            current_task_ids: currentRecommendationTaskIds(),
+            user_id: state.userId,
+          });
+          if (result.task) replaceRecommendationTask(control.dataset.itemId, result.task);
+          if (result.recommendation_memory && state.plan) {
+            state.plan = {
+              ...state.plan,
+              recommendation_memory: result.recommendation_memory,
+            };
+          }
+          showToast('已按你的偏好换成新推荐');
+        } catch (error) {
+          if (error.status === 409) {
+            showToast('当前没有更合适的任务');
+            return;
+          }
+          throw error;
+        }
       });
       return;
     }

@@ -2,11 +2,65 @@ from __future__ import annotations
 
 import unittest
 
+from recommendation_module import select_adjusted_task
 from plan_module import build_replaced_item, select_replacement_task
 from task_repository import Task
 
 
 class PlanReplacementRuleTests(unittest.TestCase):
+    def test_select_adjusted_task_excludes_current_history_and_session_pool(self) -> None:
+        tasks = [
+            Task(
+                "task_a", "原任务", "松弛疗愈", 45, 20, "home", "solo",
+                ease_level=3, physical_load=3, social_pressure=2,
+            ),
+            Task(
+                "task_b", "第一次换出的任务", "松弛疗愈", 30, 10, "home", "solo",
+                ease_level=4, physical_load=2, social_pressure=1,
+            ),
+            Task(
+                "task_c", "真正的新任务", "松弛疗愈", 20, 0, "home", "solo",
+                ease_level=5, physical_load=1, social_pressure=1,
+            ),
+        ]
+
+        replacement = select_adjusted_task(
+            candidates=tasks,
+            current_task=tasks[0],
+            adjustment="easier",
+            used_task_ids={"task_a", "task_b"},
+            constraints={
+                "budget_limit": 20,
+                "max_duration": 60,
+                "outing": "home",
+                "company": "solo",
+            },
+        )
+
+        self.assertIsNotNone(replacement)
+        self.assertEqual(replacement.id, "task_c")
+
+    def test_select_adjusted_task_returns_none_when_only_seen_tasks_match(self) -> None:
+        tasks = [
+            Task("task_a", "原任务", "活力充电", 45, 20, "home", "solo"),
+            Task("task_b", "旧替换", "活力充电", 25, 0, "home", "solo"),
+        ]
+
+        replacement = select_adjusted_task(
+            candidates=tasks,
+            current_task=tasks[0],
+            adjustment="shorter",
+            used_task_ids={"task_a", "task_b"},
+            constraints={
+                "budget_limit": 20,
+                "max_duration": 60,
+                "outing": "home",
+                "company": "solo",
+            },
+        )
+
+        self.assertIsNone(replacement)
+
     def test_select_replacement_excludes_history_and_feedback_group(self) -> None:
         tasks = [
             Task(
