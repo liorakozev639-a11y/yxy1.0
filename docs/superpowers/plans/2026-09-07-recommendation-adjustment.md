@@ -82,6 +82,6 @@
 
 - [x] **Step 2: Run targeted Python and Node tests**
 
-- [ ] **Step 3: Commit docs**
+- [x] **Step 3: Commit docs**
 
-- [ ] **Step 4: Push to GitHub**
+- [x] **Step 4: Push to GitHub**
