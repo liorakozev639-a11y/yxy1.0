@@ -48,6 +48,7 @@
     profileInsight: null,
     busy: false,
     error: '',
+    planRecoveryOptions: [],
     retryTask: null,
     detailItemId: null,
     feedbackItemId: null,
@@ -119,6 +120,10 @@
     return category ? category.id : name;
   }
 
+  function categoryIdsFromNames(names) {
+    return names.map(categoryIdByName).filter((id) => categories.some((item) => item.id === id));
+  }
+
   function header() {
     const current = stepNumbers[state.step] || 1;
     const pets = ['dog', 'pig', 'cat', 'rabbit', 'bear'];
@@ -131,9 +136,19 @@
 
   function errorBanner() {
     if (!state.error) return '';
+    const recovery = state.planRecoveryOptions.length
+      ? `<div class="plan-recovery-panel">
+        <strong>可以这样修复计划</strong>
+        <div>${state.planRecoveryOptions.map((option) => `<button class="plan-recovery-option" data-action="apply-plan-recovery" data-recovery-id="${escapeHtml(option.id)}" ${state.busy ? 'disabled' : ''}>
+          <span>${escapeHtml(option.label)}</span>
+          <small>${escapeHtml(option.description)}</small>
+        </button>`).join('')}</div>
+      </div>`
+      : '';
     return `<div class="error-banner" role="alert">
       <span>${escapeHtml(state.error)}</span>
       ${state.retryTask ? '<button class="button secondary compact" data-action="retry">重试</button>' : ''}
+      ${recovery}
     </div>`;
   }
 
@@ -301,9 +316,12 @@
 
   function feedbackPanel(item) {
     if (state.feedbackItemId !== item.id) return '';
-    const reasons = ['容易开始', '符合当前状态', '下次还想做'];
+    const reasons = flow.feedbackReasonOptions(state.feedbackRating);
+    const prompt = Number(state.feedbackRating) <= 2
+      ? '哪里不合适？系统会减少这类任务'
+      : '这项任务怎么样？';
     return `<div class="pixel-feedback-panel">
-      <span class="feedback-label">这项任务怎么样？</span>
+      <span class="feedback-label">${prompt}</span>
       <div class="feedback-rating">${[1, 2, 3, 4, 5].map((rating) => `<button class="feedback-star ${state.feedbackRating === rating ? 'is-selected' : ''}" data-action="choose-feedback-rating" data-rating="${rating}" aria-label="${rating} 分">${rating}</button>`).join('')}</div>
       <div class="feedback-reasons">${reasons.map((reason) => `<button class="feedback-reason ${state.feedbackReasons.includes(reason) ? 'is-selected' : ''}" data-action="toggle-feedback-reason" data-reason="${reason}">${reason}</button>`).join('')}</div>
       <button class="button primary compact" data-action="save-feedback" ${state.feedbackRating ? '' : 'disabled'}>保存反馈</button>
@@ -643,6 +661,7 @@
     state.recommendation = null;
     state.profileInsight = null;
     state.plan = null;
+    state.planRecoveryOptions = [];
     state.feedbackItemId = null;
     state.detailItemId = null;
     state.feedbackRating = null;
@@ -707,6 +726,7 @@
   async function runTask(task) {
     state.busy = true;
     state.error = '';
+    state.planRecoveryOptions = [];
     state.retryTask = null;
     render();
     try {
@@ -721,6 +741,7 @@
         }
       } else {
         state.error = error.message || '请求失败，请稍后重试';
+        state.planRecoveryOptions = flow.planFailureRecoveryOptions(error.details);
         state.retryTask = task;
       }
     } finally {
@@ -890,6 +911,22 @@
     state.step = 'result';
   }
 
+  async function applyPlanRecovery(option) {
+    if (!option) return;
+    if (option.removeMissingCategories && option.missingCategoriesText) {
+      const missingIds = new Set(categoryIdsFromNames(option.missingCategoriesText.split('、')));
+      const nextCategories = state.selectedCategories.filter((id) => !missingIds.has(id));
+      if (nextCategories.length > 0) state.selectedCategories = nextCategories;
+    }
+    state.profile = {
+      ...state.profile,
+      ...option.profilePatch,
+    };
+    await api.savePreferences(buildPreferences());
+    await generateCurrentPlan();
+    showToast('已按建议调整并重新生成计划');
+  }
+
   app.addEventListener('click', async (event) => {
     const control = event.target.closest('[data-action]');
     if (!control || control.disabled) return;
@@ -916,6 +953,13 @@
     if (action === 'go-mode') { state.step = 'mode'; render(); return; }
     if (action === 'previous-question') { state.currentIndex -= 1; render(); return; }
     if (action === 'retry' && state.retryTask) { await runTask(state.retryTask); return; }
+    if (action === 'apply-plan-recovery') {
+      const recoveryOption = state.planRecoveryOptions.find((entry) => entry.id === control.dataset.recoveryId);
+      await runTask(async () => {
+        await applyPlanRecovery(recoveryOption);
+      });
+      return;
+    }
     if (action === 'save-profile') {
       await runTask(async () => {
         await api.savePreferences(buildPreferences());
@@ -1085,6 +1129,7 @@
     }
     if (action === 'choose-feedback-rating') {
       state.feedbackRating = Number(control.dataset.rating);
+      state.feedbackReasons = [];
       render();
       return;
     }

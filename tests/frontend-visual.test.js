@@ -103,3 +103,19 @@ test('history insight view explains learned preference signals', () => {
   assert.match(css, /\.history-stat-grid/);
   assert.match(css, /\.history-learning/);
 });
+
+test('feedback panel and plan failure recovery expose actionable controls', () => {
+  const app = read('app.js');
+  const flow = read('flow.js');
+  const css = read('styles.css');
+
+  assert.match(app, /feedbackReasonOptions/);
+  assert.match(flow, /太累/);
+  assert.match(flow, /不感兴趣/);
+  assert.match(app, /planRecoveryOptions/);
+  assert.match(app, /data-action="apply-plan-recovery"/);
+  assert.match(app, /const recoveryOption = state\.planRecoveryOptions\.find/);
+  assert.match(app, /可以这样修复计划/);
+  assert.match(css, /\.plan-recovery-panel/);
+  assert.match(css, /\.plan-recovery-option/);
+});

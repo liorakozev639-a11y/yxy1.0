@@ -73,6 +73,34 @@
     return `已为你避开 ${count} 组不喜欢的任务`;
   }
 
+  function feedbackReasonOptions(rating) {
+    const score = Number(rating);
+    if (Number.isFinite(score) && score <= 2) {
+      return ['太累', '太贵', '不想出门', '时间太长', '不感兴趣', '社交压力大'];
+    }
+    if (Number.isFinite(score) && score === 3) {
+      return ['还可以', '时间一般', '有点费力', '可以偶尔做'];
+    }
+    return ['容易开始', '符合当前状态', '下次还想做', '时间刚好', '推荐准确'];
+  }
+
+  function planFailureRecoveryOptions(details) {
+    const rawOptions = Array.isArray(details && details.recovery_options)
+      ? details.recovery_options
+      : [];
+    const missing = Array.isArray(details && details.missing_categories)
+      ? details.missing_categories
+      : [];
+    return rawOptions.map((option) => ({
+      id: option.id || 'recovery',
+      label: option.label || '调整后重试',
+      description: option.description || '',
+      profilePatch: option.profile_patch || {},
+      removeMissingCategories: Boolean(option.remove_missing_categories),
+      missingCategoriesText: missing.join('、'),
+    }));
+  }
+
   function mergeRecommendedItems(items, recommendedTasks) {
     const planItems = Array.isArray(items) ? items : [];
     const scheduledByTaskId = new Map(
@@ -120,9 +148,11 @@
   }
 
   return {
+    feedbackReasonOptions,
     firstUnansweredIndex,
     recommendationMemorySummary,
     mergeRecommendedItems,
+    planFailureRecoveryOptions,
     recoverInitialization,
     resumeDestination,
     taskReasonSummary,

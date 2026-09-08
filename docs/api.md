@@ -83,6 +83,36 @@ Swagger：`http://127.0.0.1:8000/docs`
 
 `density` 可选 `light`、`balanced`、`full`。后端依次执行画像计算、任务筛选、分类覆盖推荐、时间排程、计划保存和网页交付 JSON 生成。
 
+如果当前预算、出行、同行或时间约束导致无法覆盖全部选择分类，返回 `409`，并在 `error.details` 中附带前端可执行的修复方案：
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "questionnaire_conflict",
+    "message": "当前约束下无法覆盖全部选择分类",
+    "details": {
+      "missing_categories": ["社交连接"],
+      "recovery_options": [
+        {
+          "id": "relax_constraints",
+          "label": "放宽条件重新生成",
+          "description": "扩大预算、出行和同行范围，让系统有更多候选任务。",
+          "profile_patch": {
+            "budget": "high",
+            "outing": "any",
+            "company": "both",
+            "pace": "balanced"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+正式前端会把 `recovery_options` 渲染为错误条下方的按钮。用户点击后，前端会保存调整后的偏好并重新调用生成计划接口。
+
 ### 查询计划
 
 `GET /api/v1/sessions/{session_id}/plan`
@@ -253,6 +283,14 @@ Swagger：`http://127.0.0.1:8000/docs`
 ```
 
 `rating` 为 1 到 5 的整数，`reasons` 可为空，最多 3 项。
+
+前端会根据评分切换原因标签：
+
+- `1-2` 分：`太累`、`太贵`、`不想出门`、`时间太长`、`不感兴趣`、`社交压力大`。
+- `3` 分：`还可以`、`时间一般`、`有点费力`、`可以偶尔做`。
+- `4-5` 分：`容易开始`、`符合当前状态`、`下次还想做`、`时间刚好`、`推荐准确`。
+
+其中 `1-2` 分会触发当前会话的推荐记忆，后续更换或重新生成计划时会减少相似任务出现。
 
 ### 查询计划反馈
 

@@ -368,6 +368,14 @@ body.pixel-body {
   background: #fff4ed;
 }
 
+.plan-recovery-panel { width: 100%; display: grid; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 2px dashed var(--pixel-line); }
+.plan-recovery-panel strong { color: var(--pixel-green-dark); }
+.plan-recovery-panel > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.plan-recovery-option { min-height: 74px; padding: 8px 10px; border: 2px solid var(--pixel-line); border-radius: 0; background: var(--pixel-paper); box-shadow: 3px 3px 0 var(--pixel-line); color: var(--pixel-ink); cursor: pointer; text-align: left; font: inherit; }
+.plan-recovery-option span { display: block; font-weight: 800; color: var(--pixel-green-dark); }
+.plan-recovery-option small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.4; }
+.plan-recovery-option:disabled { cursor: not-allowed; opacity: .6; }
+
 .button,
 .choice span,
 .text-field,
@@ -714,6 +722,7 @@ body.pixel-body {
   .review-item { align-items: flex-start; flex-direction: column; }
   .reflection-controls { justify-content: flex-start; }
   .energy-options { grid-template-columns: 1fr; }
+  .plan-recovery-panel > div { grid-template-columns: 1fr; }
   .task-load-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .history-stat-grid,
   .history-grid,

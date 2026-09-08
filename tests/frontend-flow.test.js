@@ -8,6 +8,8 @@ const {
   recommendationMemorySummary,
   taskReasonSummary,
   resumeDestination,
+  feedbackReasonOptions,
+  planFailureRecoveryOptions,
 } = require('../frontend/flow.js');
 
 test('resumeDestination distinguishes welcome, mode, quiz, and result', () => {
@@ -128,4 +130,45 @@ test('mergeRecommendedItems replaces stale recommendation cards after a task rep
   assert.equal(merged[0].task_id, 'task_new');
   assert.equal(merged[0].recommendationOnly, false);
   assert.equal(merged.some((item) => item.task_id === 'task_old'), false);
+});
+
+test('feedbackReasonOptions switches to dislike reasons for low ratings', () => {
+  assert.deepEqual(feedbackReasonOptions(2), [
+    '太累',
+    '太贵',
+    '不想出门',
+    '时间太长',
+    '不感兴趣',
+    '社交压力大',
+  ]);
+  assert.deepEqual(feedbackReasonOptions(5), [
+    '容易开始',
+    '符合当前状态',
+    '下次还想做',
+    '时间刚好',
+    '推荐准确',
+  ]);
+});
+
+test('planFailureRecoveryOptions converts backend 409 details into actionable fixes', () => {
+  const options = planFailureRecoveryOptions({
+    missing_categories: ['社交连接'],
+    recovery_options: [
+      {
+        id: 'relax_constraints',
+        label: '放宽条件重新生成',
+        description: '扩大出行和同行范围。',
+        profile_patch: { outing: 'any', company: 'both', budget: 'high' },
+      },
+    ],
+  });
+
+  assert.equal(options.length, 1);
+  assert.equal(options[0].id, 'relax_constraints');
+  assert.equal(options[0].missingCategoriesText, '社交连接');
+  assert.deepEqual(options[0].profilePatch, {
+    outing: 'any',
+    company: 'both',
+    budget: 'high',
+  });
 });

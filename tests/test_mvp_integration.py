@@ -2,9 +2,11 @@ import unittest
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
+
 from mvp_orchestrator import GeneratePlanRequest, MVPOrchestrator
 from questionnaire_module import Answer, Question, QuestionnaireSession
-from task_repository import CATEGORIES, TaskRepository
+from task_repository import CATEGORIES, Task, TaskRepository
 
 
 class FakeSessionService:
@@ -94,6 +96,24 @@ class FakeRecommendationMemory:
         if session_id != "sess_integration":
             raise AssertionError("unexpected session")
         return set(self.excluded_groups)
+
+
+class FakeLimitedTaskRepository:
+    public_tasks = [
+        Task(
+            id="task_energy_only",
+            title="居家拉伸",
+            category="活力充电",
+            duration=20,
+            budget=0,
+            outing="home",
+            company="solo",
+        )
+    ]
+    custom_tasks = {}
+
+    def search_tasks(self, **kwargs):
+        return list(self.public_tasks)
 
 
 class FakeOrchestrator:
@@ -270,6 +290,82 @@ class MVPIntegrationTests(unittest.TestCase):
         self.assertIn("match_score", task_item)
         self.assertIn("matched_preferences", task_item)
         self.assertIn("warning_text", task_item)
+
+    def test_generate_plan_conflict_returns_recovery_options(self):
+        now = datetime(2026, 8, 9, 10, 0, tzinfo=timezone.utc)
+        questions = [
+            Question(
+                id="q_energy",
+                mode="quick",
+                category="活力充电",
+                dimension="energy",
+                prompt="想活动身体",
+            ),
+            Question(
+                id="q_social",
+                mode="quick",
+                category="社交连接",
+                dimension="social",
+                prompt="想和别人互动",
+            ),
+        ]
+        questionnaire = QuestionnaireSession(
+            session_id="sess_integration",
+            mode="quick",
+            question_ids=[question.id for question in questions],
+            submitted=True,
+        )
+        answers = [
+            Answer(
+                session_id="sess_integration",
+                question_id=question.id,
+                value=4,
+                skipped=False,
+                answered_at=now,
+            )
+            for question in questions
+        ]
+        preferences = {
+            "categories": ["energy", "social"],
+            "duration": "half",
+            "budget": "low",
+            "outing": "home",
+            "company": "solo",
+        }
+        orchestrator = MVPOrchestrator(
+            sessions=FakeSessionService(preferences),
+            questionnaire=FakeQuestionnaireService(
+                FakeQuestionnaireRepository(questionnaire, answers),
+                questions,
+            ),
+            tasks=FakeLimitedTaskRepository(),
+            profiles=FakeProfileRepository(),
+            plans=FakePlanRepository(),
+            delivery=FakeDeliveryService(),
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            orchestrator.generate_plan(
+                "sess_integration",
+                GeneratePlanRequest(
+                    free_start=now,
+                    free_end=now + timedelta(hours=4),
+                    density="balanced",
+                ),
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        detail = raised.exception.detail
+        self.assertEqual(detail["message"], "当前约束下无法覆盖全部选择分类")
+        self.assertEqual(detail["missing_categories"], ["社交连接"])
+        self.assertEqual(
+            detail["recovery_options"][0]["id"],
+            "relax_constraints",
+        )
+        self.assertEqual(
+            detail["recovery_options"][0]["profile_patch"]["outing"],
+            "any",
+        )
 
     def test_api_exposes_generate_and_get_plan_routes(self):
         from fastapi.testclient import TestClient

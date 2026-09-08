@@ -48,6 +48,45 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def build_plan_recovery_options(missing_categories: list[str]) -> list[dict[str, Any]]:
+    missing_text = "、".join(missing_categories)
+    return [
+        {
+            "id": "relax_constraints",
+            "label": "放宽条件重新生成",
+            "description": (
+                f"缺少「{missing_text}」时，先扩大预算、出行和同行范围，"
+                "让系统有更多候选任务可以排进计划。"
+            ),
+            "profile_patch": {
+                "budget": "high",
+                "outing": "any",
+                "company": "both",
+                "pace": "balanced",
+            },
+        },
+        {
+            "id": "lighter_plan",
+            "label": "改成轻量计划",
+            "description": (
+                "保留当前选择方向，但降低计划密度，优先安排更容易放进时间线的任务。"
+            ),
+            "profile_patch": {
+                "outing": "any",
+                "company": "both",
+                "pace": "relaxed",
+            },
+        },
+        {
+            "id": "focus_available",
+            "label": "先保留可覆盖分类",
+            "description": f"暂时移除「{missing_text}」，先生成当前条件下能稳定执行的计划。",
+            "profile_patch": {},
+            "remove_missing_categories": True,
+        },
+    ]
+
+
 @dataclass(frozen=True)
 class GeneratePlanRequest:
     free_start: datetime
@@ -376,6 +415,9 @@ class MVPOrchestrator:
                 detail={
                     "message": "当前约束下无法覆盖全部选择分类",
                     "missing_categories": recommendation["missing_categories"],
+                    "recovery_options": build_plan_recovery_options(
+                        recommendation["missing_categories"]
+                    ),
                 },
             )
 
