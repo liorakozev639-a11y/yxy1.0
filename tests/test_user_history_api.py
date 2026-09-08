@@ -67,6 +67,20 @@ class UserHistoryApiTest(unittest.TestCase):
         self.assertEqual(summary.status_code, 200)
         self.assertEqual(summary.json()["data"]["completed_count"], 1)
 
+    def test_history_insight_endpoint_returns_learning_payload(self) -> None:
+        user = self.client.post("/api/v1/users/anonymous", json={}).json()["data"]
+
+        response = self.client.get(
+            f"/api/v1/users/{user['user_id']}/history/insight"
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertIn("has_history", data)
+        self.assertIn("summary", data)
+        self.assertIn("recent_plans", data)
+        self.assertIn("next_recommendation_strategy", data)
+
     def test_low_energy_preparation_recommends_easier_replacement(self) -> None:
         _, plan_id, item_id = self._create_plan()
 

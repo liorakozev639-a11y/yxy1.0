@@ -124,6 +124,22 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 
 当用户给任务 1–2 分或跳过任务时，系统会在当前会话和后续重排中避开对应任务组。计划页会以“已为你避开 N 组不喜欢的任务”说明这一状态；替换任务后会直接显示替换原因，但不会暴露内部任务组标识。
 
+### 7. 历史计划与偏好学习可视化
+
+正式像素前端在计划结果页提供“我的历史”入口。点击后，页面会在当前结果页内切换到历史视图，不跳转新页面，也不需要登录账号。当前 MVP 使用浏览器保存的匿名 `user_id` 关联用户历史，未来可以平滑迁移到账号体系，实现跨设备学习。
+
+历史视图会展示：
+
+- **摘要统计**：本周完成任务数、累计完成任务数、跳过/替换次数、1–2 分低分反馈次数。
+- **本周完成了哪些任务**：帮助用户看到自己已经实际完成的空闲安排。
+- **最近 5 个历史计划**：展示每个计划中的完成、跳过、替换概况。
+- **最喜欢哪些任务类型**：按大分类统计用户更常完成的方向。
+- **经常跳过哪些类型**：按大分类和细任务组解释用户可能不喜欢的任务类型。
+- **系统学到了什么**：把完成、跳过、替换、低分反馈转成用户能理解的自然语言解释。
+- **下次会如何推荐**：说明系统后续会如何提高喜欢类型的排序，并降低不合适任务的出现频率。
+
+如果用户还没有任何历史记录，页面会展示空状态，引导用户先完成、跳过或反馈几个任务。低分反馈表尚未初始化时，历史洞察服务会把低分反馈计为 0，避免第一次启动产品时历史页报错。
+
 ## 技术实现概览
 
 - **前端**：原生 HTML、CSS 和 JavaScript；采用像素风交互界面，通过 `fetch` 调用后端接口。
@@ -131,6 +147,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 - **数据库**：PostgreSQL，保存会话、偏好、问卷、答案、画像、计划、计划项、执行事件、网页交付与反馈。
 - **业务编排**：`mvp_orchestrator.py` 连接 Session、Questionnaire、Profile、Task Repository、Recommendation、Scheduling、Delivery 等模块。
 - **推荐调节**：`recommendation_module.py` 根据调节意图排序候选；`recommendation_memory.py` 将被用户换掉或调节过的任务 ID 保存到 PostgreSQL；`plan_module.py` 和 `mvp_orchestrator.py` 分别处理计划内任务和推荐池任务。
+- **历史洞察**：`history_insight_service.py` 聚合 `user_task_history`、`plans`、`plan_items` 和 `task_feedback`，为前端“我的历史”视图提供摘要统计、最近计划、偏好说明和下次推荐策略。
 - **计划版本控制**：Plan 模块每次变更计划都会递增版本号，前端必须携带当前版本号提交更新。
 - **健康检查**：`GET /health` 检查后端，`GET /api/v1/health/database` 使用只读查询检查 PostgreSQL；前端会在启动恢复时调用两者并显示可操作的中文错误提示。
 - **接口文档**：FastAPI 自动生成 Swagger，运行后访问 `http://127.0.0.1:8000/docs`；静态说明见 `docs/api.md`。
@@ -322,3 +339,25 @@ node --test tests/frontend-flow.test.js `
 - 时间线根据用户空闲时间显示可排入的任务，并保留休息块。
 
 如果全量 Python 测试提示缺少 `SESSION_DATABASE_URL`，先按照第 3 节设置 PostgreSQL 连接变量；任务库和推荐逻辑的离线测试不依赖在线数据库。
+
+## 10. 历史计划与偏好学习验收
+
+启动 PostgreSQL、后端和前端后，在浏览器访问 `http://127.0.0.1:5173/`，按下面步骤验证：
+
+1. 新开一个会话，完成兴趣选择、偏好配置、问卷和计划生成。
+2. 在计划结果页点击“我的历史”。如果还没有完成、跳过、替换或低分反馈，应看到空状态提示。
+3. 返回计划，开始一个任务并完成它，再提交一次任务反馈。
+4. 跳过或替换另一个任务。
+5. 再次点击“我的历史”，应看到本周完成数、累计完成数、跳过/替换数发生变化。
+6. 查看“系统学到了什么”和“下次会如何推荐”，应能看到系统如何利用完成、跳过、替换和低分反馈解释后续推荐策略。
+
+对应自动化测试：
+
+```powershell
+node --test tests/frontend-api.test.js tests/frontend-visual.test.js
+
+$env:SESSION_DATABASE_URL = "postgresql://postgres:<password>@127.0.0.1:5433/free_time_agent"
+.\.venv-debug\Scripts\python.exe -m unittest `
+  tests.test_history_insight_service `
+  tests.test_user_history_api -v
+```

@@ -56,6 +56,8 @@
     executionReminders: null,
     review: null,
     showingReview: false,
+    historyInsight: null,
+    showingHistory: false,
     reflectionItemId: null,
     reflectionSentiment: null,
     energyItemId: null,
@@ -379,6 +381,68 @@
     </section>`;
   }
 
+  function historyList(items, emptyText, renderItem) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return `<p class="history-empty-line">${escapeHtml(emptyText)}</p>`;
+    }
+    return `<div class="history-list">${items.map(renderItem).join('')}</div>`;
+  }
+
+  function historyPanel() {
+    const insight = state.historyInsight;
+    if (!insight) return '';
+    const summary = insight.summary || {};
+    if (!insight.has_history) {
+      return `<section class="history-panel" aria-label="我的历史">
+        <div class="pixel-section-label"><strong>我的历史</strong><span>偏好学习</span></div>
+        <div class="history-empty">
+          <span class="pixel-pet cat" aria-hidden="true"></span>
+          <h2>这里还在等第一份记录</h2>
+          <p>${escapeHtml(insight.empty_state || '完成或跳过几个任务后，这里会显示系统学到的偏好。')}</p>
+        </div>
+        <button class="button ghost" data-action="back-to-plan" ${state.busy ? 'disabled' : ''}>返回计划</button>
+      </section>`;
+    }
+    return `<section class="history-panel" aria-label="我的历史">
+      <div class="pixel-section-label"><strong>我的历史</strong><span>系统正在学习你的偏好</span></div>
+      <div class="history-stat-grid">
+        <div class="history-stat"><span>本周完成</span><strong>${escapeHtml(summary.this_week_completed_count ?? 0)}</strong></div>
+        <div class="history-stat"><span>累计完成</span><strong>${escapeHtml(summary.completed_count ?? 0)}</strong></div>
+        <div class="history-stat"><span>跳过/替换</span><strong>${escapeHtml((summary.skipped_count ?? 0) + (summary.replaced_count ?? 0))}</strong></div>
+        <div class="history-stat"><span>低分反馈</span><strong>${escapeHtml(summary.low_rating_count ?? 0)}</strong></div>
+      </div>
+      <div class="history-grid">
+        <article class="history-card">
+          <h3>本周完成了哪些任务</h3>
+          ${historyList(insight.this_week_completed_tasks, '本周还没有完成记录。', (item) => `<div class="history-row"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category || '未分类')}</span></div>`)}
+        </article>
+        <article class="history-card">
+          <h3>最近 5 个历史计划</h3>
+          ${historyList(insight.recent_plans, '还没有历史计划。', (plan) => `<div class="history-row"><strong>${escapeHtml(plan.plan_id)}</strong><span>完成 ${escapeHtml(plan.completed_count)} · 跳过 ${escapeHtml(plan.skipped_count)} · 替换 ${escapeHtml(plan.replaced_count)}</span></div>`)}
+        </article>
+        <article class="history-card">
+          <h3>最喜欢哪些任务类型</h3>
+          ${historyList(insight.favorite_categories, '完成更多任务后会出现喜欢的分类。', (item) => `<div class="history-row"><strong>${escapeHtml(item.category || '未分类')}</strong><span>完成 ${escapeHtml(item.completed_count)} 次</span></div>`)}
+        </article>
+        <article class="history-card">
+          <h3>经常跳过哪些类型</h3>
+          ${historyList(insight.avoided_groups, '暂时没有明显想避开的类型。', (item) => `<div class="history-row"><strong>${escapeHtml(item.category || '未分类')}</strong><span>${escapeHtml(item.feedback_group || '未分组')} · ${escapeHtml(item.negative_count)} 次</span></div>`)}
+        </article>
+      </div>
+      <div class="history-learning">
+        <article>
+          <h3>系统学到了什么</h3>
+          ${(insight.learning_notes || []).map((note) => `<p>${escapeHtml(note)}</p>`).join('')}
+        </article>
+        <article>
+          <h3>下次会如何推荐</h3>
+          ${(insight.next_recommendation_strategy || []).map((note) => `<p>${escapeHtml(note)}</p>`).join('')}
+        </article>
+      </div>
+      <button class="button ghost" data-action="back-to-plan" ${state.busy ? 'disabled' : ''}>返回计划</button>
+    </section>`;
+  }
+
   function reasonModal(items) {
     const item = items.find((entry) => entry.id === state.detailItemId);
     if (!item) return '';
@@ -525,7 +589,7 @@
       </div>
       <div class="pixel-plan-layout">
         <div class="pixel-plan-main">
-          <div class="pixel-section-label"><strong>今日任务推荐时间线</strong><span>版本 v${escapeHtml(plan.version ?? 1)}</span></div>
+          <div class="pixel-section-label"><strong>今日任务推荐时间线</strong><span>版本 v${escapeHtml(plan.version ?? 1)}</span><button class="button secondary compact" data-action="view-history" ${state.busy ? 'disabled' : ''}>我的历史</button></div>
           <div class="result-grid pixel-stat-grid">
             <div class="result-stat"><span>问卷模式</span><strong>${result.mode === 'deep' ? '深度版' : '快速版'}</strong></div>
             <div class="result-stat"><span>题目总数</span><strong>${result.total ?? 0}</strong></div>
@@ -533,8 +597,8 @@
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
           ${executionReminder()}
-          ${state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${displayItems.map((item, index) => renderTaskCard(item, index, plan, formatTime)).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>`}
-          ${state.review && !state.showingReview ? '<button class="button secondary" data-action="view-review">查看本次复盘</button>' : ''}
+          ${state.showingHistory ? historyPanel() : state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${displayItems.map((item, index) => renderTaskCard(item, index, plan, formatTime)).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>`}
+          ${state.review && !state.showingReview && !state.showingHistory ? '<button class="button secondary" data-action="view-review">查看本次复盘</button>' : ''}
           <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
           <div class="actions pixel-result-actions"><div class="actions-right"><button class="button secondary" data-action="add-custom-task" ${state.busy ? 'disabled' : ''}>添加自定义任务</button><button class="button secondary" data-action="replan" ${state.busy ? 'disabled' : ''}>重新排程</button><button class="button primary" data-action="confirm-plan" ${state.busy || plan.status === 'confirmed' ? 'disabled' : ''}>${plan.status === 'confirmed' ? '已按流程执行' : '按此流程执行'}</button><button class="button ghost" data-action="restart" ${state.busy ? 'disabled' : ''}><i data-lucide="rotate-ccw"></i>重新开始</button></div></div>
         </div>
@@ -586,6 +650,8 @@
     state.executionReminders = null;
     state.review = null;
     state.showingReview = false;
+    state.historyInsight = null;
+    state.showingHistory = false;
     state.reflectionItemId = null;
     state.reflectionSentiment = null;
   }
@@ -966,11 +1032,24 @@
     }
     if (action === 'view-review') {
       state.showingReview = true;
+      state.showingHistory = false;
+      render();
+      return;
+    }
+    if (action === 'view-history') {
+      await runTask(async () => {
+        const user = state.userId ? { user_id: state.userId } : await api.ensureAnonymousUser();
+        state.userId = user.user_id || state.userId;
+        state.historyInsight = await api.getHistoryInsight(state.userId);
+        state.showingHistory = true;
+        state.showingReview = false;
+      });
       render();
       return;
     }
     if (action === 'back-to-plan') {
       state.showingReview = false;
+      state.showingHistory = false;
       render();
       return;
     }

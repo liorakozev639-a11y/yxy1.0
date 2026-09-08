@@ -162,6 +162,11 @@
       return request(`/api/v1/sessions/${current}/profile/insight`);
     }
 
+    function getHistoryInsight(userId) {
+      if (!userId) throw new ApiError('当前没有可用用户', 0, 'user_missing');
+      return request(`/api/v1/users/${userId}/history/insight`);
+    }
+
     function generatePlan(input, sessionId) {
       const current = requireSessionId(sessionId);
       return request(`/api/v1/sessions/${current}/plan/generate`, {
@@ -333,6 +338,7 @@
       getFeedback,
       getHealth,
       getDatabaseHealth,
+      getHistoryInsight,
       getReview,
       getProgress,
       getPlan,

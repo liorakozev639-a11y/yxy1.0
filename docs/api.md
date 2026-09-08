@@ -260,12 +260,74 @@ Swagger：`http://127.0.0.1:8000/docs`
 
 返回当前计划下已经提交的任务反馈列表。
 
+## User History Insight
+
+### 获取历史计划与偏好学习洞察
+
+`GET /api/v1/users/{user_id}/history/insight`
+
+该接口用于正式像素前端的“我的历史”视图。它会从 PostgreSQL 中聚合当前匿名用户的全部历史行为，包括完成、跳过、替换和 1-2 分低分反馈。
+
+成功响应示例：
+
+```json
+{
+  "user_id": "user_xxx",
+  "has_history": true,
+  "empty_state": "完成或跳过几个任务后，这里会显示系统学到的偏好。",
+  "summary": {
+    "completed_count": 6,
+    "this_week_completed_count": 3,
+    "skipped_count": 2,
+    "replaced_count": 4,
+    "low_rating_count": 1
+  },
+  "this_week_completed_tasks": [
+    {
+      "title": "散步十五分钟",
+      "category": "活力充电",
+      "feedback_group": "energy_walk",
+      "completed_at": "2026-09-07T10:20:00+00:00"
+    }
+  ],
+  "recent_plans": [
+    {
+      "plan_id": "plan_xxx",
+      "created_at": "2026-09-07T09:30:00+00:00",
+      "status": "confirmed",
+      "completed_count": 2,
+      "skipped_count": 1,
+      "replaced_count": 1
+    }
+  ],
+  "favorite_categories": [
+    {"category": "活力充电", "completed_count": 4}
+  ],
+  "avoided_groups": [
+    {
+      "feedback_group": "crowded_social",
+      "category": "社交连接",
+      "negative_count": 2
+    }
+  ],
+  "learning_notes": [
+    "你更常完成「活力充电」类任务，系统会在同等条件下提高这类任务排序。"
+  ],
+  "next_recommendation_strategy": [
+    "继续避开当前会话和历史中反复跳过或替换的细任务组。"
+  ]
+}
+```
+
+如果该用户还没有历史行为，`has_history=false`，统计值为 0，列表为空；前端会显示空状态并引导用户先完成一次计划。
+
 ### 典型执行顺序
 
 ```text
 生成计划 → 确认计划 → 开始任务 → 完成任务 → 提交反馈 / 可选完成感受
                          ↘ 网页刷新检查 → needs_adjustment → 重新排程
 计划结束 → 统一复盘 → 查看完成、跳过、未完成与下次建议
+生成新计划后 → 点击我的历史 → 查看系统学到的偏好与下次推荐策略
 ```
 
 ## 错误

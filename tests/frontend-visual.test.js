@@ -13,10 +13,10 @@ test('formal frontend exposes the pixel visual shell', () => {
 
   assert.match(index, /class="site-header pixel-header"/);
   assert.match(index, /class="app-shell pixel-app-shell"/);
-  assert.match(index, /styles\.css\?v=pixel-v6/);
-  assert.match(index, /api\.js\?v=pixel-v6/);
-  assert.match(index, /flow\.js\?v=pixel-v6/);
-  assert.match(index, /app\.js\?v=pixel-v6/);
+  assert.match(index, /styles\.css\?v=pixel-v7/);
+  assert.match(index, /api\.js\?v=pixel-v7/);
+  assert.match(index, /flow\.js\?v=pixel-v7/);
+  assert.match(index, /app\.js\?v=pixel-v7/);
   assert.match(app, /class="screen pixel-screen/);
   assert.match(app, /pixel-plan-layout/);
   assert.match(app, /pixel-plan-hero/);
@@ -47,6 +47,7 @@ test('formal result markup keeps real plan actions inside pixel timeline', () =>
   assert.match(app, /data-action="add-recommended-task"/);
   assert.match(app, /task-load-summary/);
   assert.match(app, /additionalPlanItems/);
+  assert.match(app, /data-action="view-history"/);
 });
 
 test('formal frontend shows profile insight before generating the plan', () => {
@@ -86,4 +87,19 @@ test('execution review keeps pixel reminder and reflection controls', () => {
   assert.match(css, /\.execution-reminder/);
   assert.match(css, /\.review-panel/);
   assert.match(css, /\.reflection-choice/);
+});
+
+test('history insight view explains learned preference signals', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /historyPanel/);
+  assert.match(app, /我的历史/);
+  assert.match(app, /本周完成了哪些任务/);
+  assert.match(app, /系统学到了什么/);
+  assert.match(app, /下次会如何推荐/);
+  assert.match(app, /getHistoryInsight/);
+  assert.match(css, /\.history-panel/);
+  assert.match(css, /\.history-stat-grid/);
+  assert.match(css, /\.history-learning/);
 });

@@ -225,3 +225,20 @@ test('ensureAnonymousUser reuses the persisted id and execution preparation rout
   assert.equal(calls[1].url, 'http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/execution/prepare');
   assert.equal(calls[2].url, 'http://127.0.0.1:8000/api/v1/plans/plan_1/items/item_1/replace-easier');
 });
+
+test('history insight method reads anonymous user learning payload', async () => {
+  const calls = [];
+  const api = createApi({
+    storage: createStorage(),
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ data: { has_history: false, summary: {} }, error: null });
+    },
+  });
+
+  const insight = await api.getHistoryInsight('user_1');
+
+  assert.equal(insight.has_history, false);
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/v1/users/user_1/history/insight');
+  assert.equal(calls[0].options.method, 'GET');
+});

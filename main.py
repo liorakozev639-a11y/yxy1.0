@@ -22,6 +22,7 @@ from questionnaire_module import (
 from delivery_module import PostgreSQLDeliveryRepository, WebDeliveryService
 from execution_service import ExecutionService
 from feedback_service import FeedbackService
+from history_insight_service import HistoryInsightService
 from review_service import ReviewService
 from mvp_orchestrator import (
     GeneratePlanRequest,
@@ -213,6 +214,7 @@ def create_app(
     review_service: Optional[ReviewService] = None,
     memory: Optional[RecommendationMemory] = None,
     user_history: Optional[UserHistoryService] = None,
+    history_insight: Optional[HistoryInsightService] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
@@ -231,6 +233,8 @@ def create_app(
         )
     if user_history is None and database_url:
         user_history = UserHistoryService(database_url, TaskRepository())
+    if history_insight is None and database_url:
+        history_insight = HistoryInsightService(database_url)
     if orchestrator is None:
         orchestrator = build_orchestrator(
             session_service,
@@ -377,6 +381,12 @@ def create_app(
         if user_history is None:
             raise HTTPException(status_code=503, detail="用户历史服务未配置")
         return success(user_history.summary(user_id))
+
+    @app.get("/api/v1/users/{user_id}/history/insight")
+    def get_user_history_insight(user_id: str) -> dict[str, Any]:
+        if history_insight is None:
+            raise HTTPException(status_code=503, detail="用户历史洞察服务未配置")
+        return success(history_insight.insight(user_id))
 
     @app.get("/api/v1/sessions/{session_id}")
     def get_session(session_id: str) -> dict[str, Any]:
