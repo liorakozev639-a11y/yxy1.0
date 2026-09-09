@@ -5,5 +5,7 @@ __pycache__/
 .venv*/
 .uv-runtime-session/
 .env
+.env.production
+.env.local
 *.log
 .test-postgres-data/

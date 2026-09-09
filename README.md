@@ -151,6 +151,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 - **PWA 壳**：`frontend/manifest.json` 提供安装信息；`frontend/service-worker.js` 缓存前端壳页面和静态资源；`frontend/config.js` 预留线上 API 地址配置。
 - **后端**：FastAPI，同步接口由 `main.py` 统一注册。
 - **数据库**：PostgreSQL，保存会话、偏好、问卷、答案、画像、计划、计划项、执行事件、网页交付与反馈。
+- **上线材料**：`deploy/` 提供生产环境变量模板、前端公网配置模板、Nginx 反向代理模板、本地启动脚本和上线检查脚本。
 - **业务编排**：`mvp_orchestrator.py` 连接 Session、Questionnaire、Profile、Task Repository、Recommendation、Scheduling、Delivery 等模块。
 - **推荐调节**：`recommendation_module.py` 根据调节意图排序候选；`recommendation_memory.py` 将被用户换掉或调节过的任务 ID 保存到 PostgreSQL；`plan_module.py` 和 `mvp_orchestrator.py` 分别处理计划内任务和推荐池任务。
 - **失败修复建议**：`mvp_orchestrator.py` 在分类覆盖失败时返回 `recovery_options`；`frontend/flow.js` 将后端详情转成前端可执行选项；`frontend/app.js` 负责保存调整后的偏好并重新生成计划。
@@ -174,6 +175,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 - 静态接口说明：`docs/api.md`
 - 前端页面：`http://127.0.0.1:5173/`
 - PWA 配置：`frontend/manifest.json`、`frontend/service-worker.js`、`frontend/config.js`
+- 上线说明：`deploy/README-deploy.md`
 
 不要再单独运行旧版 `session_module.py` 或 `questionnaire_module.py`，否则会占用端口或形成两套不共享状态的服务。
 
@@ -272,6 +274,33 @@ window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
 ```
 
 如果这个值为空，本地会自动使用当前网页协议和主机名拼出 `:8000` 后端地址，方便继续本地调试。
+
+项目已经提供部署辅助文件：
+
+| 文件 | 用途 |
+| --- | --- |
+| `deploy/.env.production.example` | 服务器后端环境变量模板，复制后填写真实数据库密码。 |
+| `deploy/frontend-config.production.example.js` | 前端公网 API 地址模板，发布前复制为 `frontend/config.js`。 |
+| `deploy/nginx-free-time-agent.conf` | Nginx 静态前端与 FastAPI 反向代理模板。 |
+| `deploy/start-local-product.ps1` | Windows 本地一键启动 PostgreSQL、后端和前端。 |
+| `deploy/check-local-product.ps1` | 检查本地 API、数据库、首页、Manifest 和 Service Worker。 |
+| `deploy/README-deploy.md` | 完整网页版上线指南。 |
+
+本地快速启动可以执行：
+
+```powershell
+Set-Location "D:\yxy1.0"
+.\deploy\start-local-product.ps1
+```
+
+本地检查可以执行：
+
+```powershell
+Set-Location "D:\yxy1.0"
+.\deploy\check-local-product.ps1
+```
+
+真正部署到公网服务器前，需要准备服务器登录方式、域名或公网 IP、PostgreSQL 连接信息和 HTTPS 证书。当前仓库不提交真实密码；`.env.production` 和 `.env.local` 已被 `.gitignore` 忽略。
 
 ## 7. PyCharm 逐行调试
 
