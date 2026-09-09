@@ -119,3 +119,16 @@ test('feedback panel and plan failure recovery expose actionable controls', () =
   assert.match(css, /\.plan-recovery-panel/);
   assert.match(css, /\.plan-recovery-option/);
 });
+
+test('result view exposes a copyable plan share summary', () => {
+  const app = read('app.js');
+  const flow = read('flow.js');
+  const css = read('styles.css');
+
+  assert.match(flow, /buildPlanShareText/);
+  assert.match(app, /sharePlanText/);
+  assert.match(app, /data-action="copy-plan-summary"/);
+  assert.match(app, /复制计划/);
+  assert.match(app, /分享执行清单/);
+  assert.match(css, /\.share-summary-panel/);
+});

@@ -107,6 +107,23 @@
     toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2600);
   }
 
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!copied) throw new Error('copy_failed');
+  }
+
   function renderIcons() {
     if (window.lucide) window.lucide.createIcons();
   }
@@ -579,6 +596,27 @@
     </article>`;
   }
 
+  function sharePlanText() {
+    return flow.buildPlanShareText({
+      sessionId: state.sessionId,
+      categories: state.selectedCategories.map((id) => categoryById(id)?.name || id),
+      plan: state.plan,
+    });
+  }
+
+  function shareSummaryPanel() {
+    const preview = sharePlanText().split('\n').slice(0, 7).join('\n');
+    return `<section class="share-summary-panel" aria-label="分享执行清单">
+      <div>
+        <span class="eyebrow">分享执行清单</span>
+        <h3>把这份计划复制给自己或朋友</h3>
+        <p>复制内容会包含 Session、偏好方向、推荐时间、任务名称和当前状态。</p>
+      </div>
+      <pre>${escapeHtml(preview)}</pre>
+      <button class="button secondary compact" data-action="copy-plan-summary" ${state.busy ? 'disabled' : ''}>复制计划</button>
+    </section>`;
+  }
+
   function renderResult() {
     const result = state.result || {};
     const plan = state.plan || {};
@@ -615,6 +653,7 @@
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
           ${executionReminder()}
+          ${!state.showingHistory && !state.showingReview ? shareSummaryPanel() : ''}
           ${state.showingHistory ? historyPanel() : state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${displayItems.map((item, index) => renderTaskCard(item, index, plan, formatTime)).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>`}
           ${state.review && !state.showingReview && !state.showingHistory ? '<button class="button secondary" data-action="view-review">查看本次复盘</button>' : ''}
           <div class="session-box"><span>Session ID</span><code>${escapeHtml(state.sessionId)}</code></div>
@@ -958,6 +997,15 @@
       await runTask(async () => {
         await applyPlanRecovery(recoveryOption);
       });
+      return;
+    }
+    if (action === 'copy-plan-summary') {
+      try {
+        await copyText(sharePlanText());
+        showToast('计划已复制，可以直接分享');
+      } catch (_) {
+        window.prompt('复制失败，请手动复制下面的计划', sharePlanText());
+      }
       return;
     }
     if (action === 'save-profile') {

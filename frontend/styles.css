@@ -586,6 +586,7 @@ body.pixel-body {
 .pixel-feedback-panel .button { margin-left: auto; }
 .recommendation-memory-note,
 .execution-reminder,
+.share-summary-panel,
 .review-panel,
 .history-panel {
   margin-top: 14px;
@@ -598,6 +599,28 @@ body.pixel-body {
 .execution-reminder.startable { background: #e8f3ee; color: var(--pixel-green-dark); }
 .execution-reminder.ending-soon { background: var(--pixel-yellow); color: var(--pixel-ink); }
 .execution-reminder.needs-adjustment { background: #fff0ea; border-left: 8px solid var(--pixel-coral); color: #9b392c; }
+.share-summary-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: #fffdf8;
+  border-left: 8px solid var(--pixel-green);
+}
+.share-summary-panel h3 { margin: 3px 0 6px; font-size: 18px; }
+.share-summary-panel p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.share-summary-panel pre {
+  max-height: 128px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 2px dashed var(--pixel-line);
+  background: var(--pixel-paper);
+  color: var(--pixel-green-dark);
+  white-space: pre-wrap;
+  font: 700 12px "Courier New", "Noto Sans SC", "Microsoft YaHei", monospace;
+}
 .review-panel { padding: 18px; background: var(--pixel-paper); }
 .history-panel { padding: 18px; background: var(--pixel-paper); }
 .history-stat-grid {
@@ -718,6 +741,7 @@ body.pixel-body {
   .pixel-section-label { align-items: flex-start; flex-direction: column; gap: 5px; }
   .pixel-timeline-item { grid-template-columns: 76px 1fr; }
   .pixel-task-header { flex-direction: column; }
+  .share-summary-panel { grid-template-columns: 1fr; }
   .pixel-result-actions .actions-right { flex-wrap: wrap; }
   .review-item { align-items: flex-start; flex-direction: column; }
   .reflection-controls { justify-content: flex-start; }

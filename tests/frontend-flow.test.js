@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  buildPlanShareText,
   firstUnansweredIndex,
   mergeRecommendedItems,
   recoverInitialization,
@@ -11,6 +12,50 @@ const {
   feedbackReasonOptions,
   planFailureRecoveryOptions,
 } = require('../frontend/flow.js');
+
+test('buildPlanShareText creates a copyable checklist with recommended times', () => {
+  const text = buildPlanShareText({
+    sessionId: 'sess_share',
+    categories: ['松弛疗愈', '自我成长'],
+    plan: {
+      plan_id: 'plan_share',
+      status: 'draft',
+      items: [
+        {
+          kind: 'task',
+          title: '做一次三分钟眼部放松',
+          category: '松弛疗愈',
+          status: 'pending',
+          start_at: '2026-09-09T09:00:00',
+          end_at: '2026-09-09T09:10:00',
+        },
+        {
+          kind: 'rest',
+          title: '休息一下',
+          status: 'pending',
+          start_at: '2026-09-09T09:10:00',
+          end_at: '2026-09-09T09:25:00',
+        },
+        {
+          kind: 'task',
+          title: '整理今天想学的三个问题',
+          category: '自我成长',
+          status: 'completed',
+          start_at: '2026-09-09T09:25:00',
+          end_at: '2026-09-09T09:45:00',
+        },
+      ],
+    },
+  });
+
+  assert.match(text, /留白计划执行清单/);
+  assert.match(text, /Session：sess_share/);
+  assert.match(text, /方向：松弛疗愈、自我成长/);
+  assert.match(text, /01\. 09:00-09:10 做一次三分钟眼部放松/);
+  assert.match(text, /02\. 09:10-09:25 休息一下/);
+  assert.match(text, /03\. 09:25-09:45 整理今天想学的三个问题/);
+  assert.match(text, /状态：已完成/);
+});
 
 test('resumeDestination distinguishes welcome, mode, quiz, and result', () => {
   assert.equal(resumeDestination({ preferences: {}, progress: null }), 'welcome');

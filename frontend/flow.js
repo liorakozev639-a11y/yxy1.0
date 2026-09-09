@@ -73,6 +73,55 @@
     return `已为你避开 ${count} 组不喜欢的任务`;
   }
 
+  function formatShareTime(value) {
+    if (!value) return '--:--';
+    const text = String(value);
+    const match = text.match(/T(\d{2}):(\d{2})/);
+    if (match) return `${match[1]}:${match[2]}`;
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return '--:--';
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+
+  function shareStatusLabel(status) {
+    return {
+      active: '进行中',
+      completed: '已完成',
+      missed: '已错过',
+      needs_adjustment: '待调整',
+      overdue: '已超时',
+      pending: '待开始',
+      recommended: '待安排',
+      skipped: '已跳过',
+    }[status || 'pending'] || '待开始';
+  }
+
+  function buildPlanShareText({ sessionId, categories, plan }) {
+    const items = Array.isArray(plan && plan.items) ? plan.items : [];
+    const lines = [
+      '留白计划执行清单',
+      `Session：${sessionId || '未创建'}`,
+    ];
+    if (Array.isArray(categories) && categories.length > 0) {
+      lines.push(`方向：${categories.join('、')}`);
+    }
+    lines.push('');
+    if (items.length === 0) {
+      lines.push('当前还没有可分享的任务。');
+    } else {
+      items.forEach((item, index) => {
+        const start = formatShareTime(item.start_at);
+        const end = formatShareTime(item.end_at);
+        const title = item.title || '未命名任务';
+        const category = item.category ? `｜${item.category}` : '';
+        lines.push(`${String(index + 1).padStart(2, '0')}. ${start}-${end} ${title}${category}｜状态：${shareStatusLabel(item.status)}`);
+      });
+    }
+    lines.push('');
+    lines.push('来自「留白计划」：把空闲时间变成可以开始的小安排。');
+    return lines.join('\n');
+  }
+
   function feedbackReasonOptions(rating) {
     const score = Number(rating);
     if (Number.isFinite(score) && score <= 2) {
@@ -148,6 +197,7 @@
   }
 
   return {
+    buildPlanShareText,
     feedbackReasonOptions,
     firstUnansweredIndex,
     recommendationMemorySummary,
