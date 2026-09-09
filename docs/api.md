@@ -13,6 +13,28 @@ Swagger：`http://127.0.0.1:8000/docs`
 }
 ```
 
+## Frontend Runtime
+
+正式前端是静态网页，可作为 PWA 部署。入口文件包括：
+
+- `frontend/index.html`
+- `frontend/config.js`
+- `frontend/manifest.json`
+- `frontend/service-worker.js`
+- `frontend/api.js`
+- `frontend/flow.js`
+- `frontend/app.js`
+
+`frontend/config.js` 用于配置线上 API 地址：
+
+```javascript
+window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
+```
+
+本地开发时该值可以保持为空，前端会默认请求当前网页主机名的 `:8000` 端口。正式上线时应改为公网 HTTPS 后端地址。
+
+Service Worker 只缓存前端壳页面和静态资源，不缓存 `/api/v1/` 和 `/health` 请求。这样用户刷新页面时前端可以更快打开，但会话、问卷、计划、执行和反馈数据仍然实时来自 FastAPI 与 PostgreSQL。
+
 ## Health
 
 ### 检查后端服务

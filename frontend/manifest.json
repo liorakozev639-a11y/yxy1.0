@@ -1,0 +1,25 @@
+{
+  "name": "留白计划",
+  "short_name": "留白计划",
+  "description": "把突然出现的空闲时间整理成可以执行的小计划。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f6f1",
+  "theme_color": "#f7f6f1",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

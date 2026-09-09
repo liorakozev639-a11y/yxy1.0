@@ -68,6 +68,7 @@
   const stepNumbers = { welcome: 1, profile: 2, mode: 3, quiz: 4, insight: 5, result: 6 };
   let toastTimer;
   let executionRefreshTimer;
+  let deferredInstallPrompt = null;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
@@ -128,6 +129,28 @@
     if (window.lucide) window.lucide.createIcons();
   }
 
+  function isStandalonePwa() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
+
+  function pwaInstallCard() {
+    if (isStandalonePwa()) return '';
+    return `<aside class="pwa-install-card" aria-label="添加到桌面">
+      <span class="pixel-pet dog" aria-hidden="true"></span>
+      <div><strong>像 App 一样使用留白计划</strong><p>部署到 HTTPS 后，可以把网页添加到桌面或手机主屏幕。</p></div>
+      <button class="button secondary compact" data-action="install-pwa" ${deferredInstallPrompt ? '' : 'disabled'}>添加到桌面</button>
+    </aside>`;
+  }
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js').catch(() => {
+        showToast('离线缓存暂时不可用');
+      });
+    });
+  }
+
   function categoryById(id) {
     return categories.find((category) => category.id === id);
   }
@@ -184,6 +207,7 @@
       <p class="eyebrow">为突然到来的自由时段，留一份清醒的安排</p>
       <h1>这段时间，你想把自己放在哪个方向？</h1>
       <p class="lead">选择一个或多个方向，我们会据此准备与你当前状态更相关的问题。</p>
+      ${pwaInstallCard()}
       <div class="section-heading"><h3>此刻最重要的事</h3><p>可多选</p></div>
       <div class="direction-grid">${categories.map((category) => `<button class="direction-card ${state.selectedCategories.includes(category.id) ? 'is-selected' : ''}" data-action="toggle-category" data-id="${category.id}" aria-pressed="${state.selectedCategories.includes(category.id)}" ${state.busy ? 'disabled' : ''}>
         <span class="direction-icon ${category.id}"><i data-lucide="${category.icon}" aria-hidden="true"></i></span>
@@ -999,6 +1023,17 @@
       });
       return;
     }
+    if (action === 'install-pwa') {
+      if (!deferredInstallPrompt) {
+        showToast('浏览器暂时没有开放安装入口');
+        return;
+      }
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      render();
+      return;
+    }
     if (action === 'copy-plan-summary') {
       try {
         await copyText(sharePlanText());
@@ -1365,5 +1400,18 @@
     if (event.target.name === 'location') state.profile.location = event.target.value;
   });
 
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    render();
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    showToast('已添加到桌面');
+    render();
+  });
+
+  registerServiceWorker();
   initialize();
 }());

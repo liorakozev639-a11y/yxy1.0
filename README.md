@@ -148,6 +148,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 ## 技术实现概览
 
 - **前端**：原生 HTML、CSS 和 JavaScript；采用像素风交互界面，通过 `fetch` 调用后端接口。
+- **PWA 壳**：`frontend/manifest.json` 提供安装信息；`frontend/service-worker.js` 缓存前端壳页面和静态资源；`frontend/config.js` 预留线上 API 地址配置。
 - **后端**：FastAPI，同步接口由 `main.py` 统一注册。
 - **数据库**：PostgreSQL，保存会话、偏好、问卷、答案、画像、计划、计划项、执行事件、网页交付与反馈。
 - **业务编排**：`mvp_orchestrator.py` 连接 Session、Questionnaire、Profile、Task Repository、Recommendation、Scheduling、Delivery 等模块。
@@ -172,6 +173,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 - 后端接口文档：`http://127.0.0.1:8000/docs`
 - 静态接口说明：`docs/api.md`
 - 前端页面：`http://127.0.0.1:5173/`
+- PWA 配置：`frontend/manifest.json`、`frontend/service-worker.js`、`frontend/config.js`
 
 不要再单独运行旧版 `session_module.py` 或 `questionnaire_module.py`，否则会占用端口或形成两套不共享状态的服务。
 
@@ -254,7 +256,24 @@ http://127.0.0.1:5173/
 
 前端只在 `localStorage` 保存 `free_time_agent_session_id`。刷新页面后会从 PostgreSQL 恢复当前问卷和已保存答案。
 
-## 6. PyCharm 逐行调试
+## 6. PWA 与上线准备
+
+当前前端已经具备基础 PWA 能力：
+
+- 浏览器会读取 `frontend/manifest.json`，识别应用名称、主题色、启动路径和图标。
+- `frontend/service-worker.js` 会缓存首页、CSS、配置文件、API 客户端、流程脚本、主交互脚本和像素图片。
+- Service Worker 不缓存 `/api/v1/` 和 `/health` 请求，避免用户看到过期的业务数据。
+- 首页会在浏览器允许时显示“添加到桌面”入口；在本机 `localhost/127.0.0.1` 可调试，正式安装体验需要 HTTPS。
+
+线上部署时，把 `frontend/config.js` 中的 `FREE_TIME_API_BASE_URL` 设置成公网后端地址，例如：
+
+```javascript
+window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
+```
+
+如果这个值为空，本地会自动使用当前网页协议和主机名拼出 `:8000` 后端地址，方便继续本地调试。
+
+## 7. PyCharm 逐行调试
 
 新建 Python Run/Debug Configuration：
 
@@ -273,7 +292,7 @@ http://127.0.0.1:5173/
 
 点击 Debug 后，从前端操作或 Swagger 调用接口，PyCharm 会在对应断点暂停。
 
-## 7. 自动化测试
+## 8. 自动化测试
 
 先设置 `SESSION_DATABASE_URL`，再执行：
 
@@ -286,7 +305,7 @@ node --test tests/*.test.js
 
 Python 测试会创建临时 Session，并在结束后从 PostgreSQL 删除这些测试数据。
 
-## 8. 实机链路检查
+## 9. 实机链路检查
 
 后端运行时执行：
 
@@ -320,7 +339,7 @@ Invoke-RestMethod `
 
 脚本会验证创建会话、保存偏好、提交问卷、画像、推荐、排程、网页交付和计划恢复。
 
-## 9. 本次任务库与十条推荐验收
+## 10. 本次任务库与十条推荐验收
 
 在仓库根目录执行：
 
@@ -347,7 +366,7 @@ node --test tests/frontend-flow.test.js `
 
 如果全量 Python 测试提示缺少 `SESSION_DATABASE_URL`，先按照第 3 节设置 PostgreSQL 连接变量；任务库和推荐逻辑的离线测试不依赖在线数据库。
 
-## 10. 历史计划与偏好学习验收
+## 11. 历史计划与偏好学习验收
 
 启动 PostgreSQL、后端和前端后，在浏览器访问 `http://127.0.0.1:5173/`，按下面步骤验证：
 
@@ -368,3 +387,13 @@ $env:SESSION_DATABASE_URL = "postgresql://postgres:<password>@127.0.0.1:5433/fre
   tests.test_history_insight_service `
   tests.test_user_history_api -v
 ```
+
+## 12. PWA 验收
+
+启动前端后打开 `http://127.0.0.1:5173/`：
+
+1. 进入首页，应看到“像 App 一样使用留白计划”的提示区域。
+2. 在支持 PWA 安装的浏览器中，地址栏或页面会出现安装入口。
+3. 打开浏览器开发者工具的 Application / 应用 面板，应能看到 Manifest 和 Service Worker。
+4. 刷新页面后，前端静态资源应能继续加载；业务数据仍然从后端和 PostgreSQL 读取。
+5. 线上部署时必须使用 HTTPS，否则大多数手机浏览器不会显示正式安装入口。
