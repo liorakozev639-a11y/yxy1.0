@@ -1,0 +1,12 @@
+.git/
+.venv/
+.venv-debug/
+.worktrees/
+.pytest_cache/
+.test-postgres-data/
+__pycache__/
+backup-before-github-20260814-1/
+.sdd-postgres-task1/
+*.log
+outputs/
+work/

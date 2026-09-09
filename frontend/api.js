@@ -12,9 +12,22 @@
 }(typeof window !== 'undefined' ? window : null, function () {
   const STORAGE_KEY = 'free_time_agent_session_id';
   const USER_STORAGE_KEY = 'free_time_agent_user_id';
+
+  function isLocalHostname(hostname) {
+    return hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname.startsWith('192.168.')
+      || hostname.startsWith('10.')
+      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+  }
+
   function defaultBaseUrl() {
     if (typeof window !== 'undefined' && window.location?.hostname) {
-      return `${window.location.protocol}//${window.location.hostname}:8000`;
+      const hostname = window.location.hostname;
+      if (isLocalHostname(hostname)) {
+        return `${window.location.protocol}//${hostname}:8000`;
+      }
+      return window.location.origin;
     }
     return 'http://127.0.0.1:8000';
   }

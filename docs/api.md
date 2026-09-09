@@ -31,7 +31,7 @@ Swagger：`http://127.0.0.1:8000/docs`
 window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
 ```
 
-本地开发时该值可以保持为空，前端会默认请求当前网页主机名的 `:8000` 端口。正式上线时应改为公网 HTTPS 后端地址；如果使用同域名 Nginx 反向代理，可以设置为该域名本身，例如 `https://example.com`。
+本地开发时该值可以保持为空，前端会默认请求当前网页主机名的 `:8000` 端口。部署到 Vercel 等同域名方案时也可以保持为空，前端会自动请求当前线上域名下的 `/api/v1/...` 和 `/health`。如果前后端分离部署，则应改为公网 HTTPS 后端地址，例如 `https://api.example.com`。
 
 部署模板位于：
 
@@ -41,6 +41,9 @@ window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
 - `deploy/README-deploy.md`
 - `render.yaml`
 - `deploy/write_frontend_config.py`
+- `deploy/README-vercel.md`
+- `vercel.json`
+- `api/index.py`
 
 Service Worker 只缓存前端壳页面和静态资源，不缓存 `/api/v1/` 和 `/health` 请求。这样用户刷新页面时前端可以更快打开，但会话、问卷、计划、执行和反馈数据仍然实时来自 FastAPI 与 PostgreSQL。
 

@@ -151,7 +151,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 - **PWA 壳**：`frontend/manifest.json` 提供安装信息；`frontend/service-worker.js` 缓存前端壳页面和静态资源；`frontend/config.js` 预留线上 API 地址配置。
 - **后端**：FastAPI，同步接口由 `main.py` 统一注册。
 - **数据库**：PostgreSQL，保存会话、偏好、问卷、答案、画像、计划、计划项、执行事件、网页交付与反馈。
-- **上线材料**：`deploy/` 提供生产环境变量模板、前端公网配置模板、Nginx 反向代理模板、本地启动脚本和上线检查脚本。
+- **上线材料**：`deploy/` 提供 Vercel + Supabase、Render + Supabase、独立服务器 + Nginx 三种网页版上线资料。
 - **业务编排**：`mvp_orchestrator.py` 连接 Session、Questionnaire、Profile、Task Repository、Recommendation、Scheduling、Delivery 等模块。
 - **推荐调节**：`recommendation_module.py` 根据调节意图排序候选；`recommendation_memory.py` 将被用户换掉或调节过的任务 ID 保存到 PostgreSQL；`plan_module.py` 和 `mvp_orchestrator.py` 分别处理计划内任务和推荐池任务。
 - **失败修复建议**：`mvp_orchestrator.py` 在分类覆盖失败时返回 `recovery_options`；`frontend/flow.js` 将后端详情转成前端可执行选项；`frontend/app.js` 负责保存调整后的偏好并重新生成计划。
@@ -175,7 +175,8 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 - 静态接口说明：`docs/api.md`
 - 前端页面：`http://127.0.0.1:5173/`
 - PWA 配置：`frontend/manifest.json`、`frontend/service-worker.js`、`frontend/config.js`
-- 上线说明：`deploy/README-deploy.md`
+- Vercel 上线说明：`deploy/README-vercel.md`
+- 服务器/Render 上线说明：`deploy/README-deploy.md`
 
 不要再单独运行旧版 `session_module.py` 或 `questionnaire_module.py`，否则会占用端口或形成两套不共享状态的服务。
 
@@ -267,13 +268,45 @@ http://127.0.0.1:5173/
 - Service Worker 不缓存 `/api/v1/` 和 `/health` 请求，避免用户看到过期的业务数据。
 - 首页会在浏览器允许时显示“添加到桌面”入口；在本机 `localhost/127.0.0.1` 可调试，正式安装体验需要 HTTPS。
 
-线上部署时，把 `frontend/config.js` 中的 `FREE_TIME_API_BASE_URL` 设置成公网后端地址，例如：
+线上部署有两种推荐方式。
+
+**方案 B：Vercel + Supabase**
+
+这是当前优先方案。前端和 FastAPI 后端部署在同一个 Vercel 域名下，PostgreSQL 使用 Supabase。此时 `frontend/config.js` 可以保持为空，前端会自动请求当前 Vercel 同源域名下的 `/api/v1/...` 和 `/health`，不会再请求本机 `:8000` 端口。
+
+需要准备的文件已经在仓库中：
+
+| 文件 | 用途 |
+| --- | --- |
+| `vercel.json` | 告诉 Vercel 如何把 `/api/*`、`/health` 交给 FastAPI，把首页和静态资源交给 `frontend`。 |
+| `api/index.py` | Vercel Python Serverless 入口，复用现有 `main.py` 中的 FastAPI 应用。 |
+| `.vercelignore` | 排除本地虚拟环境、日志、备份和生成文件，减少部署包体积。 |
+| `deploy/README-vercel.md` | Vercel + Supabase 免费上线步骤。 |
+
+在 Vercel 的环境变量中填写：
+
+```text
+SESSION_DATABASE_URL=Supabase Transaction pooler PostgreSQL 连接串
+FRONTEND_ORIGINS=https://你的-vercel-域名.vercel.app
+```
+
+部署后访问：
+
+```text
+https://你的-vercel-域名.vercel.app/
+https://你的-vercel-域名.vercel.app/health
+https://你的-vercel-域名.vercel.app/docs
+```
+
+**独立服务器或 Render 分离部署**
+
+如果前端和后端不在同一个域名下，可以把 `frontend/config.js` 中的 `FREE_TIME_API_BASE_URL` 设置成公网后端地址，例如：
 
 ```javascript
 window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
 ```
 
-如果这个值为空，本地会自动使用当前网页协议和主机名拼出 `:8000` 后端地址，方便继续本地调试。
+本地开发时，如果这个值为空，前端会自动使用当前网页协议和主机名拼出 `:8000` 后端地址，方便继续本地调试；线上非本地域名会默认使用同源地址。
 
 项目已经提供部署辅助文件：
 
@@ -285,6 +318,9 @@ window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
 | `deploy/start-local-product.ps1` | Windows 本地一键启动 PostgreSQL、后端和前端。 |
 | `deploy/check-local-product.ps1` | 检查本地 API、数据库、首页、Manifest 和 Service Worker。 |
 | `deploy/README-deploy.md` | 完整网页版上线指南。 |
+| `deploy/README-vercel.md` | Vercel + Supabase 免费上线指南。 |
+| `vercel.json` | Vercel 前后端同域名部署配置。 |
+| `api/index.py` | Vercel FastAPI 入口文件。 |
 | `render.yaml` | Render 免费方案的后端与静态前端 Blueprint。 |
 | `deploy/write_frontend_config.py` | Render 静态站点构建时写入公网 API 地址。 |
 
@@ -304,7 +340,7 @@ Set-Location "D:\yxy1.0"
 
 真正部署到公网服务器前，需要准备服务器登录方式、域名或公网 IP、PostgreSQL 连接信息和 HTTPS 证书。当前仓库不提交真实密码；`.env.production` 和 `.env.local` 已被 `.gitignore` 忽略。
 
-如果暂时没有服务器，推荐先用免费方案：Supabase 提供 PostgreSQL，Render 通过 `render.yaml` 部署 `free-time-agent-api` 后端和 `free-time-agent-web` 前端。具体申请和部署步骤见 `deploy/README-deploy.md` 第 9 节。
+如果暂时没有服务器，推荐先用免费方案 B：Supabase 提供 PostgreSQL，Vercel 通过 `vercel.json` 部署前端和 FastAPI 后端。具体申请和部署步骤见 `deploy/README-vercel.md`。如果 Vercel 不适合，再使用 Render 方案，步骤见 `deploy/README-deploy.md` 第 10 节。
 
 ## 7. PyCharm 逐行调试
 

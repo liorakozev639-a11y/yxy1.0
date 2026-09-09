@@ -67,7 +67,7 @@ window.FREE_TIME_API_BASE_URL = 'https://<your-domain>';
 window.FREE_TIME_API_BASE_URL = 'https://<your-domain>';
 ```
 
-不要在正式生产环境留空。留空时前端会进入本地调试规则，默认请求当前主机的 `:8000` 端口。
+如果使用独立服务器或 Render 这种前后端分离部署，不要在正式生产环境留空。留空时，本地域名会默认请求当前主机的 `:8000` 端口；Vercel 等线上同域名部署会默认请求当前线上域名。
 
 ## 5. 本地一键启动
 
@@ -127,11 +127,28 @@ sudo systemctl reload nginx
 
 没有服务器登录权限时，只能完成本地仓库的部署准备，不能直接把进程运行到公网服务器上。
 
-## 9. 免费方案一：Supabase + Render 操作步骤
+## 9. 免费方案一：Supabase + Vercel 操作步骤
+
+如果没有服务器，并且 Render 要求绑定银行卡，优先使用 Vercel。Vercel 可以把当前仓库中的静态前端和 FastAPI 后端放在同一个域名下，PostgreSQL 仍使用 Supabase。
+
+完整步骤见：
+
+```text
+deploy/README-vercel.md
+```
+
+关键点：
+
+- Vercel 读取根目录 `vercel.json`。
+- `api/index.py` 是 Vercel 的 FastAPI Serverless 入口。
+- `frontend/config.js` 可以保持为空，线上会自动使用当前 Vercel 域名作为 API 地址。
+- 只需要在 Vercel 环境变量中填写 `SESSION_DATABASE_URL`。
+
+## 10. 免费方案二：Supabase + Render 操作步骤
 
 这个方案不需要你购买服务器，适合先让别人通过链接体验 MVP。
 
-### 9.1 申请 Supabase 数据库
+### 10.1 申请 Supabase 数据库
 
 1. 打开 `https://supabase.com/`。
 2. 使用 GitHub 或邮箱注册。
@@ -147,7 +164,7 @@ sudo systemctl reload nginx
 postgresql://postgres.xxx:<你的数据库密码>@aws-xxx.pooler.supabase.com:6543/postgres
 ```
 
-### 9.2 申请 Render 后端
+### 10.2 申请 Render 后端
 
 1. 打开 `https://render.com/`。
 2. 使用 GitHub 登录。
@@ -162,7 +179,7 @@ SESSION_DATABASE_URL=Supabase 给你的 PostgreSQL 地址
 FRONTEND_ORIGINS=https://free-time-agent-web.onrender.com
 ```
 
-### 9.3 检查 Render 后端
+### 10.3 检查 Render 后端
 
 部署完成后打开：
 
@@ -190,7 +207,7 @@ https://free-time-agent-api.onrender.com/api/v1/health/database
 
 成功时 `data.status` 应为 `ok`。
 
-### 9.4 检查 Render 前端
+### 10.4 检查 Render 前端
 
 打开：
 
@@ -200,7 +217,7 @@ https://free-time-agent-web.onrender.com/
 
 能进入像素风首页，并且可以完成问卷和生成计划，说明前端、后端和 Supabase 已经连通。
 
-### 9.5 如果服务名被占用
+### 10.5 如果服务名被占用
 
 如果 Render 提示 `free-time-agent-api` 或 `free-time-agent-web` 名称不可用，需要改两个地方：
 
