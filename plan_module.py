@@ -262,6 +262,38 @@ class PlanManagementService:
     def init_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS plans (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    density TEXT NOT NULL,
+                    free_start TIMESTAMPTZ NOT NULL,
+                    free_end TIMESTAMPTZ NOT NULL,
+                    version INTEGER NOT NULL,
+                    parent_plan_id TEXT,
+                    unscheduled_task_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS plan_items (
+                    id TEXT PRIMARY KEY,
+                    plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+                    task_id TEXT,
+                    title TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    start_at TIMESTAMPTZ NOT NULL,
+                    end_at TIMESTAMPTZ NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    locked BOOLEAN NOT NULL DEFAULT FALSE,
+                    replacement_history JSONB NOT NULL DEFAULT '[]'::jsonb
+                )
+                """
+            )
+            connection.execute(
                 "ALTER TABLE plans ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'"
             )
             connection.execute(
