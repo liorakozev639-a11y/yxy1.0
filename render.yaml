@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: free-time-agent-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SESSION_DATABASE_URL
+        sync: false
+      - key: FRONTEND_ORIGINS
+        value: https://free-time-agent-web.onrender.com
+
+  - type: web
+    name: free-time-agent-web
+    runtime: static
+    plan: free
+    buildCommand: python deploy/write_frontend_config.py
+    staticPublishPath: ./frontend
+    envVars:
+      - key: FREE_TIME_API_BASE_URL
+        value: https://free-time-agent-api.onrender.com
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+

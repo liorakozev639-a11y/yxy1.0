@@ -126,3 +126,85 @@ sudo systemctl reload nginx
 - 已经部署好的服务器目录和你希望使用的域名。
 
 没有服务器登录权限时，只能完成本地仓库的部署准备，不能直接把进程运行到公网服务器上。
+
+## 9. 免费方案一：Supabase + Render 操作步骤
+
+这个方案不需要你购买服务器，适合先让别人通过链接体验 MVP。
+
+### 9.1 申请 Supabase 数据库
+
+1. 打开 `https://supabase.com/`。
+2. 使用 GitHub 或邮箱注册。
+3. 点击 `New project`。
+4. 项目名填写 `free-time-agent`。
+5. 保存你自己设置的数据库密码。
+6. 创建完成后进入 `Project Settings -> Database`。
+7. 复制 PostgreSQL connection string。
+
+最终你需要拿到类似这样的地址：
+
+```text
+postgresql://postgres.xxx:<你的数据库密码>@aws-xxx.pooler.supabase.com:6543/postgres
+```
+
+### 9.2 申请 Render 后端
+
+1. 打开 `https://render.com/`。
+2. 使用 GitHub 登录。
+3. 连接仓库 `liorakozev639-a11y/yxy1.0`。
+4. 选择 `New -> Blueprint`。
+5. 选择仓库根目录中的 `render.yaml`。
+6. 创建 `free-time-agent-api` 和 `free-time-agent-web` 两个服务。
+7. 在 `free-time-agent-api` 的 Environment 中填写：
+
+```text
+SESSION_DATABASE_URL=Supabase 给你的 PostgreSQL 地址
+FRONTEND_ORIGINS=https://free-time-agent-web.onrender.com
+```
+
+### 9.3 检查 Render 后端
+
+部署完成后打开：
+
+```text
+https://free-time-agent-api.onrender.com/health
+```
+
+成功时应返回：
+
+```json
+{
+  "data": {
+    "status": "ok",
+    "service": "api"
+  },
+  "error": null
+}
+```
+
+再打开：
+
+```text
+https://free-time-agent-api.onrender.com/api/v1/health/database
+```
+
+成功时 `data.status` 应为 `ok`。
+
+### 9.4 检查 Render 前端
+
+打开：
+
+```text
+https://free-time-agent-web.onrender.com/
+```
+
+能进入像素风首页，并且可以完成问卷和生成计划，说明前端、后端和 Supabase 已经连通。
+
+### 9.5 如果服务名被占用
+
+如果 Render 提示 `free-time-agent-api` 或 `free-time-agent-web` 名称不可用，需要改两个地方：
+
+1. `render.yaml` 中对应服务名。
+2. `FREE_TIME_API_BASE_URL` 和 `FRONTEND_ORIGINS` 中的 `.onrender.com` 地址。
+
+改完后提交到 GitHub，再重新部署。

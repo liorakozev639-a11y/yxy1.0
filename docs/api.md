@@ -39,6 +39,8 @@ window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
 - `deploy/frontend-config.production.example.js`
 - `deploy/nginx-free-time-agent.conf`
 - `deploy/README-deploy.md`
+- `render.yaml`
+- `deploy/write_frontend_config.py`
 
 Service Worker 只缓存前端壳页面和静态资源，不缓存 `/api/v1/` 和 `/health` 请求。这样用户刷新页面时前端可以更快打开，但会话、问卷、计划、执行和反馈数据仍然实时来自 FastAPI 与 PostgreSQL。
 

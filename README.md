@@ -285,6 +285,8 @@ window.FREE_TIME_API_BASE_URL = 'https://api.example.com';
 | `deploy/start-local-product.ps1` | Windows 本地一键启动 PostgreSQL、后端和前端。 |
 | `deploy/check-local-product.ps1` | 检查本地 API、数据库、首页、Manifest 和 Service Worker。 |
 | `deploy/README-deploy.md` | 完整网页版上线指南。 |
+| `render.yaml` | Render 免费方案的后端与静态前端 Blueprint。 |
+| `deploy/write_frontend_config.py` | Render 静态站点构建时写入公网 API 地址。 |
 
 本地快速启动可以执行：
 
@@ -301,6 +303,8 @@ Set-Location "D:\yxy1.0"
 ```
 
 真正部署到公网服务器前，需要准备服务器登录方式、域名或公网 IP、PostgreSQL 连接信息和 HTTPS 证书。当前仓库不提交真实密码；`.env.production` 和 `.env.local` 已被 `.gitignore` 忽略。
+
+如果暂时没有服务器，推荐先用免费方案：Supabase 提供 PostgreSQL，Render 通过 `render.yaml` 部署 `free-time-agent-api` 后端和 `free-time-agent-web` 前端。具体申请和部署步骤见 `deploy/README-deploy.md` 第 9 节。
 
 ## 7. PyCharm 逐行调试
 
