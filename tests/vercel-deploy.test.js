@@ -24,8 +24,9 @@ test('vercel config serves FastAPI and the pixel frontend from one domain', () =
 test('vercel Python entry exports the repository FastAPI app', () => {
   const entry = read('api/index.py');
 
+  assert.match(entry, /^app = FastAPI\(/m);
   assert.match(entry, /sys\.path\.insert\(0, str\(ROOT\)\)/);
-  assert.match(entry, /from main import app/);
+  assert.match(entry, /from main import app as main_app/);
 });
 
 test('frontend uses localhost port 8000 locally and same-origin API in production', () => {

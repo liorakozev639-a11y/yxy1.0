@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+app = FastAPI(title="Free Time Agent API", version="1.0.0")
+
 
 def _sanitize_error(message: str) -> str:
     sanitized = re.sub(r"://([^:@/]+):([^@/]+)@", r"://\1:<hidden>@", message)
@@ -53,6 +55,8 @@ def create_startup_error_app(exc: Exception) -> FastAPI:
 
 
 try:
-    from main import app  # noqa: E402,F401
+    from main import app as main_app  # noqa: E402
 except Exception as exc:  # pragma: no cover - Vercel runtime safety net.
     app = create_startup_error_app(exc)
+else:
+    app = main_app
