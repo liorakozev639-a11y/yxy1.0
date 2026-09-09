@@ -794,10 +794,39 @@ def create_app(
     return app
 
 
-app = create_app() if os.getenv("SESSION_DATABASE_URL") else FastAPI(
-    title="Free Time Agent API",
-    version="1.0.0",
-)
+def create_unconfigured_app() -> FastAPI:
+    app = FastAPI(
+        title="Free Time Agent API",
+        version="1.0.0",
+    )
+
+    def missing_database_response() -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "data": None,
+                "error": {
+                    "code": "database_not_configured",
+                    "message": "启动服务前必须设置 SESSION_DATABASE_URL",
+                },
+            },
+        )
+
+    @app.get("/health")
+    def health() -> JSONResponse:
+        return missing_database_response()
+
+    @app.api_route(
+        "/api/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    )
+    def api_unavailable(path: str) -> JSONResponse:
+        return missing_database_response()
+
+    return app
+
+
+app = create_app() if os.getenv("SESSION_DATABASE_URL") else create_unconfigured_app()
 
 
 if __name__ == "__main__":

@@ -298,6 +298,8 @@ https://你的-vercel-域名.vercel.app/health
 https://你的-vercel-域名.vercel.app/docs
 ```
 
+如果首页能打开，但后端返回 `database_not_configured`，说明 Vercel 环境变量里还缺少 `SESSION_DATABASE_URL`，需要在项目设置中补充 Supabase PostgreSQL 连接串后重新部署。
+
 **独立服务器或 Render 分离部署**
 
 如果前端和后端不在同一个域名下，可以把 `frontend/config.js` 中的 `FREE_TIME_API_BASE_URL` 设置成公网后端地址，例如：

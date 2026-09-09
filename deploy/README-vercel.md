@@ -61,6 +61,26 @@ https://你的-vercel-域名.vercel.app/docs
 - `/docs` 能打开 FastAPI Swagger。
 - 完成问卷后可以生成计划、替换任务、调整任务、查看历史洞察。
 
+如果首页能打开，但 `/health` 或 `/api/v1/sessions` 返回：
+
+```json
+{
+  "data": null,
+  "error": {
+    "code": "database_not_configured",
+    "message": "启动服务前必须设置 SESSION_DATABASE_URL"
+  }
+}
+```
+
+说明 Vercel 项目还没有配置 `SESSION_DATABASE_URL`，或者配置后还没有重新部署。进入：
+
+```text
+Project Settings -> Environment Variables
+```
+
+补充 Supabase PostgreSQL 连接串后，点击 `Deployments -> Redeploy`。
+
 ## 6. 本地与线上 API 的区别
 
 本地开发时，前端默认调用：
