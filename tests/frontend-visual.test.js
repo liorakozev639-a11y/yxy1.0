@@ -11,12 +11,14 @@ test('formal frontend exposes the pixel visual shell', () => {
   const app = read('app.js');
   const css = read('styles.css');
 
+  assert.doesNotMatch(index, /Agent|演示原型/);
+  assert.match(index, /今日留白/);
   assert.match(index, /class="site-header pixel-header"/);
   assert.match(index, /class="app-shell pixel-app-shell"/);
-  assert.match(index, /styles\.css\?v=pixel-v7/);
-  assert.match(index, /api\.js\?v=pixel-v7/);
-  assert.match(index, /flow\.js\?v=pixel-v7/);
-  assert.match(index, /app\.js\?v=pixel-v7/);
+  assert.match(index, /styles\.css\?v=pixel-v8/);
+  assert.match(index, /api\.js\?v=pixel-v8/);
+  assert.match(index, /flow\.js\?v=pixel-v8/);
+  assert.match(index, /app\.js\?v=pixel-v8/);
   assert.match(app, /class="screen pixel-screen/);
   assert.match(app, /pixel-plan-layout/);
   assert.match(app, /pixel-plan-hero/);
@@ -31,6 +33,18 @@ test('formal frontend exposes the pixel visual shell', () => {
   assert.match(css, /image-rendering:\s*pixelated/);
   assert.match(css, /\.pixel-plan-layout/);
   assert.ok(fs.existsSync(path.join(frontendDir, 'pixel-companions.png')));
+});
+
+test('formal pixel shell uses polished product copy and readable Chinese typography', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /正在恢复你的留白进度/);
+  assert.doesNotMatch(app, /正在连接本地服务并读取问卷进度/);
+  assert.match(app, /今天想把空闲时间留给什么/);
+  assert.match(app, /像素搭子/);
+  assert.match(css, /body\.pixel-body[\s\S]*Microsoft YaHei[\s\S]*sans-serif/);
+  assert.match(css, /\.pixel-shell-card/);
 });
 
 test('formal result markup keeps real plan actions inside pixel timeline', () => {
@@ -48,6 +62,19 @@ test('formal result markup keeps real plan actions inside pixel timeline', () =>
   assert.match(app, /task-load-summary/);
   assert.match(app, /additionalPlanItems/);
   assert.match(app, /data-action="view-history"/);
+});
+
+test('recommended task cards show explanation and compact load signals directly', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /recommendation-explain/);
+  assert.match(app, /为什么适合现在/);
+  assert.match(app, /推荐可信度/);
+  assert.match(app, /task-load-summary/);
+  assert.match(css, /\.recommendation-explain/);
+  assert.match(css, /\.recommendation-score-pill/);
+  assert.match(css, /\.pixel-task-meta-line/);
 });
 
 test('formal frontend shows profile insight before generating the plan', () => {

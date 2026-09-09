@@ -88,9 +88,10 @@ test('execution start requires an energy choice and execution mutations carry us
   assert.match(app, /api\.skipExecution\([^\n]+\{ user_id: state\.userId \}\)/);
 });
 
-test('result view does not show recommendation history explanations', () => {
+test('result view presents recommendation explanations without raw backend history labels', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
 
-  assert.doesNotMatch(app, /recommendationMemorySummary/);
-  assert.doesNotMatch(app, /replacementReason/);
+  assert.match(app, /recommendationExplain/);
+  assert.match(app, /为什么适合现在/);
+  assert.doesNotMatch(app, /replacement_history/);
 });

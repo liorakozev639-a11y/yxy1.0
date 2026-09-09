@@ -196,7 +196,7 @@
     return `<section class="status-screen pixel-screen">
       <span class="status-icon"><i data-lucide="loader-circle" aria-hidden="true"></i></span>
       <h1>正在恢复你的留白</h1>
-      <p class="lead">正在连接本地服务并读取问卷进度。</p>
+      <p class="lead">正在恢复你的留白进度，稍等一下。</p>
       ${errorBanner()}
     </section>`;
   }
@@ -204,9 +204,18 @@
   function renderWelcome() {
     const hasSelection = state.selectedCategories.length > 0;
     return `<section class="screen pixel-screen">
-      <p class="eyebrow">为突然到来的自由时段，留一份清醒的安排</p>
-      <h1>这段时间，你想把自己放在哪个方向？</h1>
-      <p class="lead">选择一个或多个方向，我们会据此准备与你当前状态更相关的问题。</p>
+      <div class="pixel-shell-card">
+        <div>
+          <p class="eyebrow">为突然空出来的一段时间，留一份舒服的安排</p>
+          <h1>今天想把空闲时间留给什么？</h1>
+          <p class="lead">先选出你在意的方向，留白计划会用问卷、偏好画像和历史反馈，整理一组更容易开始的小任务。</p>
+        </div>
+        <div class="welcome-companion">
+          <span class="pixel-pet dog" aria-hidden="true"></span>
+          <strong>像素搭子</strong>
+          <p>陪你把想做的事排进今天。</p>
+        </div>
+      </div>
       ${pwaInstallCard()}
       <div class="section-heading"><h3>此刻最重要的事</h3><p>可多选</p></div>
       <div class="direction-grid">${categories.map((category) => `<button class="direction-card ${state.selectedCategories.includes(category.id) ? 'is-selected' : ''}" data-action="toggle-category" data-id="${category.id}" aria-pressed="${state.selectedCategories.includes(category.id)}" ${state.busy ? 'disabled' : ''}>
@@ -384,6 +393,19 @@
       ['地点依赖', summary.loadProfile && summary.loadProfile.location],
     ];
     return `<div class="task-load-summary" aria-label="任务轻重与限制">${values.map(([label, value]) => `<span><small>${escapeHtml(label)}</small><b>${escapeHtml(value || '--')}</b></span>`).join('')}</div>`;
+  }
+
+  function recommendationExplain(item) {
+    const summary = flow.taskReasonSummary(item);
+    const score = summary.matchScore === null ? '--' : `${Math.round(summary.matchScore * 100)}%`;
+    const text = summary.replacementReason || summary.text;
+    return `<div class="recommendation-explain" aria-label="推荐理由">
+      <div class="recommendation-explain-title">
+        <strong>为什么适合现在</strong>
+        <span class="recommendation-score-pill">推荐可信度 ${escapeHtml(score)}</span>
+      </div>
+      <p>${escapeHtml(text)}</p>
+    </div>`;
   }
 
   function loadProfile(summary) {
@@ -611,7 +633,7 @@
       : '';
     return `<article class="timeline-item pixel-timeline-item recommended-task-card status-${escapeHtml(status)} ${item.recommendationOnly ? 'is-recommendation-only' : ''} ${status === 'skipped' ? 'is-skipped' : ''}">
       <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${time}</div>
-      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
+      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span class="pixel-task-meta-line">${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${recommendationExplain(item)}${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
         ${executionActions(item, plan)}
         ${detailButton}
         ${editButton}
