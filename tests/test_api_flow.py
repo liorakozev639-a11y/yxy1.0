@@ -6,11 +6,32 @@ import unittest
 from fastapi.testclient import TestClient
 
 from main import create_app
+from main import PreferencesInput
 from questionnaire_module import (
     PostgresQuestionnaireRepository,
     QuestionnaireService,
 )
 from session_module import PostgresSessionRepository, SessionService
+
+
+class PreferencesInputTests(unittest.TestCase):
+    def test_preferences_input_accepts_life_context_fields(self) -> None:
+        preferences = PreferencesInput(
+            categories=["energy"],
+            duration="half",
+            budget="low",
+            outing="nearby",
+            company="solo",
+            weather="rainy",
+            day_part="evening",
+            energy_level="low",
+            mood="anxious",
+        )
+
+        self.assertEqual(preferences.weather, "rainy")
+        self.assertEqual(preferences.day_part, "evening")
+        self.assertEqual(preferences.energy_level, "low")
+        self.assertEqual(preferences.mood, "anxious")
 
 
 class ApiFlowTests(unittest.TestCase):

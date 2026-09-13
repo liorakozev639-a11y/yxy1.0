@@ -150,6 +150,39 @@
     }));
   }
 
+  function lifeContextSummary(profile) {
+    const weatherLabels = {
+      clear: '天气适合外出',
+      rainy: '下雨或天气不稳定',
+      hot: '天气偏热',
+      cold: '天气偏冷',
+      indoor: '今天想待在室内',
+    };
+    const dayPartLabels = {
+      morning: '上午',
+      afternoon: '下午',
+      evening: '晚上',
+      late: '睡前',
+    };
+    const energyLabels = {
+      low: '低精力',
+      medium: '中等精力',
+      high: '高精力',
+    };
+    const moodLabels = {
+      empty: '想放空',
+      anxious: '有点焦虑',
+      bored: '有点无聊',
+      recharge: '想充电',
+    };
+    return [
+      weatherLabels[profile && profile.weather],
+      dayPartLabels[profile && profile.day_part],
+      energyLabels[profile && profile.energy_level],
+      moodLabels[profile && profile.mood],
+    ].filter(Boolean);
+  }
+
   function mergeRecommendedItems(items, recommendedTasks) {
     const planItems = Array.isArray(items) ? items : [];
     const scheduledByTaskId = new Map(
@@ -200,6 +233,7 @@
     buildPlanShareText,
     feedbackReasonOptions,
     firstUnansweredIndex,
+    lifeContextSummary,
     recommendationMemorySummary,
     mergeRecommendedItems,
     planFailureRecoveryOptions,

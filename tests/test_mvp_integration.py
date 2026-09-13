@@ -201,6 +201,28 @@ class MVPIntegrationTests(unittest.TestCase):
         self.assertEqual(len(result["tasks"]), 10)
         self.assertEqual(len(result["task_ids"]), 10)
 
+    def test_normalized_preferences_keep_life_context_fields(self):
+        constraints = MVPOrchestrator._normalize_preferences(
+            {
+                "categories": ["energy", "calm"],
+                "duration": "half",
+                "budget": "low",
+                "outing": "nearby",
+                "company": "solo",
+                "weather": "rainy",
+                "day_part": "evening",
+                "energy_level": "low",
+                "mood": "anxious",
+            }
+        )
+
+        self.assertEqual(constraints["categories"], ["活力充电", "松弛疗愈"])
+        self.assertEqual(constraints["budget_limit"], 20)
+        self.assertEqual(constraints["weather"], "rainy")
+        self.assertEqual(constraints["day_part"], "evening")
+        self.assertEqual(constraints["energy_level"], "low")
+        self.assertEqual(constraints["mood"], "anxious")
+
     def test_group_nearby_medium_tasks_cover_selected_categories(self):
         selected_categories = ["松弛疗愈", "社交连接", "乐享探索"]
 

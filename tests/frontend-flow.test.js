@@ -11,6 +11,7 @@ const {
   resumeDestination,
   feedbackReasonOptions,
   planFailureRecoveryOptions,
+  lifeContextSummary,
 } = require('../frontend/flow.js');
 
 test('buildPlanShareText creates a copyable checklist with recommended times', () => {
@@ -216,4 +217,13 @@ test('planFailureRecoveryOptions converts backend 409 details into actionable fi
     company: 'both',
     budget: 'high',
   });
+});
+
+test('lifeContextSummary converts real-life constraints into readable labels', () => {
+  assert.deepEqual(lifeContextSummary({
+    weather: 'rainy',
+    day_part: 'evening',
+    energy_level: 'low',
+    mood: 'anxious',
+  }), ['下雨或天气不稳定', '晚上', '低精力', '有点焦虑']);
 });

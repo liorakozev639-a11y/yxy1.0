@@ -29,6 +29,10 @@
       outing: 'nearby',
       company: 'solo',
       pace: 'balanced',
+      weather: 'clear',
+      day_part: 'afternoon',
+      energy_level: 'medium',
+      mood: 'empty',
     };
   }
 
@@ -236,15 +240,24 @@
   }
 
   function renderProfile() {
+    const contextLabels = flow.lifeContextSummary(state.profile);
     return `<section class="screen pixel-screen">
-      <p class="eyebrow">第 2 步 · 可用条件</p>
-      <h2>让安排适合你真正拥有的时间</h2>
-      <p class="lead">条件会保存到当前会话，并用于筛选本次问卷。</p>
+      <p class="eyebrow">第 2 步 · 今日状态</p>
+      <h2>先告诉我今天的真实情况</h2>
+      <p class="lead">这些条件会影响问卷、推荐和排程。天气、时间段、精力和情绪会帮助系统避开不适合现在做的任务。</p>
+      <div class="life-context-strip">
+        <span class="pixel-pet pig" aria-hidden="true"></span>
+        <div><strong>当前推荐会参考</strong><p>${contextLabels.length ? contextLabels.map(escapeHtml).join(' · ') : '选择下面的状态后，系统会生成更贴近当下的任务。'}</p></div>
+      </div>
       <div class="form-grid">
         <div class="form-block"><span class="form-label">身份</span>${segmented('persona', state.profile.persona, [['student', '在校学生'], ['worker', '职场人']])}</div>
         <div class="form-block"><span class="form-label">近期学习或工作状态</span>${segmented('workload', state.profile.workload, [['light', '节奏平稳'], ['busy', '忙碌/加班中'], ['off', '休假或调休']])}</div>
         <div class="form-block"><span class="form-label">可用时长</span>${segmented('timeMode', state.profile.timeMode, [['half', '半天'], ['day', '全天']])}</div>
         <div class="form-block"><span class="form-label">预算区间</span>${segmented('budget', state.profile.budget, [['low', '20 元以内'], ['medium', '40 元以内'], ['high', '80 元以内']])}</div>
+        <div class="form-block"><span class="form-label">今天的天气/出门成本</span>${segmented('weather', state.profile.weather, [['clear', '适合外出'], ['rainy', '下雨/不稳定'], ['hot', '偏热'], ['cold', '偏冷'], ['indoor', '想待室内']])}</div>
+        <div class="form-block"><span class="form-label">准备使用的时间段</span>${segmented('day_part', state.profile.day_part, [['morning', '上午'], ['afternoon', '下午'], ['evening', '晚上'], ['late', '睡前']])}</div>
+        <div class="form-block"><span class="form-label">现在的精力</span>${segmented('energy_level', state.profile.energy_level, [['low', '有点累'], ['medium', '还可以'], ['high', '精力充足']])}</div>
+        <div class="form-block"><span class="form-label">现在的心情</span>${segmented('mood', state.profile.mood, [['empty', '想放空'], ['anxious', '有点焦虑'], ['bored', '有点无聊'], ['recharge', '想充电']])}</div>
         <div class="form-block"><label class="form-label" for="location">所在城市或校园（选填）</label><input id="location" class="text-field" name="location" value="${escapeHtml(state.profile.location)}" placeholder="例如：上海徐汇区" ${state.busy ? 'disabled' : ''}></div>
         <div class="form-block"><span class="form-label">活动方式</span>${segmented('outing', state.profile.outing, [['home', '居家完成'], ['nearby', '附近出门'], ['city', '全城范围'], ['any', '都可以']])}</div>
         <div class="form-block"><span class="form-label">同行偏好</span>${segmented('company', state.profile.company, [['solo', '独处'], ['group', '结伴'], ['both', '都可以']])}</div>
@@ -303,6 +316,7 @@
     const dimensions = Array.isArray(insight.top_dimensions) ? insight.top_dimensions : [];
     const cards = Array.isArray(insight.constraint_cards) ? insight.constraint_cards : [];
     const suggestions = Array.isArray(insight.suggestions) ? insight.suggestions : [];
+    const contextLabels = flow.lifeContextSummary(state.profile);
     return `<section class="screen pixel-screen profile-insight-screen">
       <div class="pixel-plan-hero">
         <div>
@@ -342,6 +356,11 @@
             <p>如果某个方向得分较低，但你在第一步选择了它，系统仍会保留少量相关任务，避免计划只偏向单一类型。</p>
           </div>
         </div>
+      </div>
+      <div class="profile-insight-card life-context-summary">
+        <span class="eyebrow">今天的真实生活条件</span>
+        <div class="context-chip-list">${contextLabels.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>
+        <p>生成计划时，系统会根据这些条件减少不合适的外出、高体力、高社交压力任务。</p>
       </div>
       <div class="profile-insight-card suggestion-panel">
         <span class="eyebrow">生成计划前的建议</span>
@@ -680,6 +699,7 @@
       if (!value) return '--:--';
       return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
+    const contextLabels = flow.lifeContextSummary(state.profile);
     return `<section class="screen pixel-screen result-screen">
       <div class="pixel-plan-hero">
         <div>
@@ -699,6 +719,10 @@
             <div class="result-stat"><span>已跳过</span><strong>${result.skipped_count ?? 0}</strong></div>
           </div>
           ${executionReminder()}
+          <section class="plan-context-panel" aria-label="本次推荐参考条件">
+            <div><strong>本次推荐参考了</strong><p>${contextLabels.map(escapeHtml).join(' · ') || '你的兴趣方向、预算、出行和同行偏好'}</p></div>
+            <span class="pixel-pet dog" aria-hidden="true"></span>
+          </section>
           ${!state.showingHistory && !state.showingReview ? shareSummaryPanel() : ''}
           ${state.showingHistory ? historyPanel() : state.showingReview ? reviewPanel() : `<div class="timeline-list pixel-timeline">${displayItems.map((item, index) => renderTaskCard(item, index, plan, formatTime)).join('') || '<p class="lead">暂时没有可展示的计划任务。</p>'}</div>`}
           ${state.review && !state.showingReview && !state.showingHistory ? '<button class="button secondary" data-action="view-review">查看本次复盘</button>' : ''}
@@ -769,6 +793,10 @@
       company: state.profile.company,
       city_or_campus: state.profile.location.trim() || null,
       rest_only: state.profile.workload === 'busy' || state.profile.pace === 'relaxed',
+      weather: state.profile.weather,
+      day_part: state.profile.day_part,
+      energy_level: state.profile.energy_level,
+      mood: state.profile.mood,
     };
   }
 
@@ -781,6 +809,10 @@
     state.profile.outing = preferences.outing || state.profile.outing;
     state.profile.company = preferences.company || state.profile.company;
     state.profile.location = preferences.city_or_campus || '';
+    state.profile.weather = preferences.weather || state.profile.weather;
+    state.profile.day_part = preferences.day_part || state.profile.day_part;
+    state.profile.energy_level = preferences.energy_level || state.profile.energy_level;
+    state.profile.mood = preferences.mood || state.profile.mood;
     if (preferences.rest_only) state.profile.pace = 'relaxed';
   }
 

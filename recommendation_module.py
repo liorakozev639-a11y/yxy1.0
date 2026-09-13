@@ -25,6 +25,34 @@ ADJUSTMENT_LABELS: dict[str, str] = {
     "more_growth": "更有成长感",
 }
 
+WEATHER_LABELS = {
+    "clear": "天气适合外出",
+    "rainy": "下雨或天气不稳定",
+    "hot": "天气偏热",
+    "cold": "天气偏冷",
+    "indoor": "今天更想待在室内",
+}
+
+DAY_PART_LABELS = {
+    "morning": "上午",
+    "afternoon": "下午",
+    "evening": "晚上",
+    "late": "睡前",
+}
+
+ENERGY_LABELS = {
+    "low": "低精力",
+    "medium": "中等精力",
+    "high": "高精力",
+}
+
+MOOD_LABELS = {
+    "empty": "想放空",
+    "anxious": "有点焦虑",
+    "bored": "有点无聊",
+    "recharge": "想充电",
+}
+
 
 def recommend_tasks(
     profile: dict[str, Any],
@@ -303,6 +331,52 @@ def load_fit_score(task: Task, constraints: dict[str, Any] | None = None) -> flo
         score += 0.06
     elif outing in {"city", "any"}:
         score += 0.03
+
+    weather = constraints.get("weather")
+    if weather in {"rainy", "hot", "cold", "indoor"}:
+        if task.location_dependency in {"home", "flexible"} or task.outing == "home":
+            score += 0.16
+        elif task.outing == "city":
+            score -= 0.12
+    elif weather == "clear" and task.outing in {"nearby", "city"}:
+        score += 0.05
+
+    day_part = constraints.get("day_part")
+    if day_part in {"evening", "late"}:
+        score += (6 - task.physical_load) * 0.05
+        if task.duration <= 45:
+            score += 0.04
+    elif day_part == "morning" and task.category in {"活力充电", "自我成长"}:
+        score += 0.04
+
+    energy_level = constraints.get("energy_level")
+    if energy_level == "low":
+        score += task.ease_level * 0.06
+        score += (6 - task.physical_load) * 0.06
+        score += (6 - task.social_pressure) * 0.03
+    elif energy_level == "high":
+        score += max(0, task.physical_load - 2) * 0.04
+    elif energy_level == "medium":
+        score += 0.03 if 2 <= task.physical_load <= 4 else 0
+
+    mood = constraints.get("mood")
+    if mood == "anxious":
+        score += (6 - task.social_pressure) * 0.05
+        score += (6 - task.physical_load) * 0.03
+        if task.category == "松弛疗愈":
+            score += 0.08
+    elif mood == "empty":
+        score += task.ease_level * 0.04
+        if task.category == "松弛疗愈":
+            score += 0.06
+    elif mood == "bored":
+        if task.category in {"乐享探索", "社交连接"}:
+            score += 0.07
+        if task.outing in {"nearby", "city"}:
+            score += 0.04
+    elif mood == "recharge":
+        if task.category in {"活力充电", "自我成长"}:
+            score += 0.07
     return round(score, 4)
 
 
@@ -380,7 +454,7 @@ def calculate_match_score(
 ) -> float:
     constraints = constraints or {}
     active_minutes = slot_minutes or task.duration
-    score = float(preference_score)
+    score = float(preference_score) + _life_context_match_delta(task, constraints)
     if task.budget > constraints.get("budget_limit", task.budget):
         score -= 0.1
     if active_minutes > constraints.get("max_duration", active_minutes):
@@ -392,6 +466,47 @@ def calculate_match_score(
     if company and company != "both" and task.company not in {company, "both"}:
         score -= 0.1
     return round(max(0.0, min(1.0, score)), 2)
+
+
+def _life_context_match_delta(task: Task, constraints: dict[str, Any]) -> float:
+    delta = 0.0
+    weather = constraints.get("weather")
+    if weather in {"rainy", "hot", "cold", "indoor"}:
+        if task.outing == "home" or task.location_dependency in {"home", "flexible"}:
+            delta += 0.08
+        elif task.outing in {"nearby", "city"}:
+            delta -= 0.1
+    elif weather == "clear" and task.outing in {"nearby", "city"}:
+        delta += 0.03
+
+    day_part = constraints.get("day_part")
+    if day_part in {"evening", "late"}:
+        delta += 0.04 if task.physical_load <= 2 else 0
+        delta -= 0.08 if task.physical_load >= 4 else 0
+
+    energy_level = constraints.get("energy_level")
+    if energy_level == "low":
+        if task.ease_level >= 4 and task.physical_load <= 2:
+            delta += 0.08
+        if task.physical_load >= 4:
+            delta -= 0.12
+    elif energy_level == "high" and task.physical_load >= 3:
+        delta += 0.04
+
+    mood = constraints.get("mood")
+    if mood in {"anxious", "empty"}:
+        if task.social_pressure <= 2:
+            delta += 0.05
+        if task.social_pressure >= 4:
+            delta -= 0.08
+        if mood == "anxious" and task.physical_load >= 4:
+            delta -= 0.04
+    elif mood == "bored" and task.category in {"乐享探索", "社交连接"}:
+        delta += 0.05
+    elif mood == "recharge" and task.category in {"活力充电", "自我成长"}:
+        delta += 0.05
+
+    return delta
 
 
 def build_matched_preferences(
@@ -436,6 +551,28 @@ def build_matched_preferences(
             matches.append("轻松度较高")
         if task.physical_load <= 2:
             matches.append("体力负担低")
+    weather = constraints.get("weather")
+    if weather in {"rainy", "hot", "cold", "indoor"} and (
+        task.outing == "home" or task.location_dependency in {"home", "flexible"}
+    ):
+        matches.append("天气友好")
+    elif weather == "clear" and task.outing in {"nearby", "city"}:
+        matches.append("适合出门")
+    day_part = constraints.get("day_part")
+    if day_part in {"evening", "late"} and task.physical_load <= 2:
+        matches.append("夜间低负担")
+    energy_level = constraints.get("energy_level")
+    if energy_level == "low" and task.ease_level >= 4 and task.physical_load <= 2:
+        matches.append("低精力友好")
+    elif energy_level == "high" and task.physical_load >= 3:
+        matches.append("高精力可承接")
+    mood = constraints.get("mood")
+    if mood in {"anxious", "empty"} and task.social_pressure <= 2:
+        matches.append("情绪安抚")
+    elif mood == "bored" and task.category in {"乐享探索", "社交连接"}:
+        matches.append("增加新鲜感")
+    elif mood == "recharge" and task.category in {"活力充电", "自我成长"}:
+        matches.append("补充能量")
     if company == "solo" and task.social_pressure <= 2:
         matches.append("社交压力低")
     if task.location_dependency == "flexible":
@@ -467,6 +604,16 @@ def build_warning_text(
         warnings.append("社交压力可能偏高")
     if outing == "home" and task.location_dependency not in {"home", "flexible"}:
         warnings.append("地点依赖不适合居家")
+    weather = constraints.get("weather")
+    if weather in {"rainy", "hot", "cold", "indoor"} and task.outing in {"nearby", "city"}:
+        warnings.append("当前天气下外出成本可能偏高")
+    day_part = constraints.get("day_part")
+    if day_part in {"evening", "late"} and task.physical_load >= 4:
+        warnings.append("当前时间段体力消耗可能偏高")
+    if constraints.get("energy_level") == "low" and task.physical_load >= 4:
+        warnings.append("低精力时可能偏累")
+    if constraints.get("mood") == "anxious" and task.social_pressure >= 4:
+        warnings.append("焦虑时社交压力可能偏高")
     if not warnings:
         return ""
     return "；".join(warnings) + "，请确认是否接受。"
@@ -519,6 +666,24 @@ def build_reason_tags(
         tags.append("社交压力高")
     if task.location_dependency == "flexible":
         tags.append("地点灵活")
+    weather = constraints.get("weather")
+    if weather in {"rainy", "hot", "cold", "indoor"} and (
+        task.outing == "home" or task.location_dependency in {"home", "flexible"}
+    ):
+        tags.append("天气友好")
+    elif weather == "clear" and task.outing in {"nearby", "city"}:
+        tags.append("适合出门")
+    day_part = constraints.get("day_part")
+    if day_part in {"evening", "late"} and task.physical_load <= 2:
+        tags.append("夜间低负担")
+    energy_level = constraints.get("energy_level")
+    if energy_level == "low" and task.ease_level >= 4 and task.physical_load <= 2:
+        tags.append("低精力友好")
+    mood = constraints.get("mood")
+    if mood in {"anxious", "empty"} and task.social_pressure <= 2:
+        tags.append("情绪安抚")
+    elif mood == "bored" and task.category in {"乐享探索", "社交连接"}:
+        tags.append("新鲜感")
     tags.append(f"覆盖{task.category}")
     return tags
 
@@ -561,6 +726,29 @@ def build_reason_text(
     )
     if constraints.get("rest_only"):
         lines.append("你当前偏恢复，系统会优先选择轻松度较高、体力消耗较低的任务。")
+    weather = constraints.get("weather")
+    if weather in WEATHER_LABELS:
+        if weather in {"rainy", "hot", "cold", "indoor"}:
+            lines.append(
+                f"考虑到{WEATHER_LABELS[weather]}，系统会优先保留居家、地点灵活或外出成本更低的任务。"
+            )
+        else:
+            lines.append("今天天气适合外出，所以附近活动和城市探索会获得少量加分。")
+    day_part = constraints.get("day_part")
+    if day_part in DAY_PART_LABELS:
+        lines.append(
+            f"当前时间段是{DAY_PART_LABELS[day_part]}，系统会避免让这个时段变得过重。"
+        )
+    energy_level = constraints.get("energy_level")
+    if energy_level in ENERGY_LABELS:
+        lines.append(
+            f"你现在是{ENERGY_LABELS[energy_level]}状态，系统会按这个体感调整任务轻重。"
+        )
+    mood = constraints.get("mood")
+    if mood in MOOD_LABELS:
+        lines.append(
+            f"你标记了「{MOOD_LABELS[mood]}」，系统会选择更贴近当前情绪的任务。"
+        )
     return "\n".join(lines)
 
 

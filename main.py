@@ -1,5 +1,4 @@
 """Unified FastAPI entry point for Session and Questionnaire modules."""
-
 from __future__ import annotations
 
 import os
@@ -36,7 +35,6 @@ from session_module import PostgresSessionRepository, SessionService
 from task_repository import TaskRepository
 from user_history_service import UserHistoryService
 
-
 ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
@@ -56,6 +54,10 @@ class PreferencesInput(BaseModel):
     company: Literal["solo", "group", "both"]
     city_or_campus: Optional[str] = Field(default=None, max_length=128)
     rest_only: bool = False
+    weather: Literal["clear", "rainy", "hot", "cold", "indoor"] = "clear"
+    day_part: Literal["morning", "afternoon", "evening", "late"] = "afternoon"
+    energy_level: Literal["low", "medium", "high"] = "medium"
+    mood: Literal["empty", "anxious", "bored", "recharge"] = "empty"
 
 
 class StartQuestionnaireInput(BaseModel):

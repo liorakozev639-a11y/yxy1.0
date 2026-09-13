@@ -378,6 +378,85 @@
 - 可以完整走完问卷、画像、推荐、计划、执行和反馈流程。
 - 控制台没有 `api.xxx is not a function` 这类前端方法缺失错误。
 
+### 3.15 后端模块功能总览
+
+**用户价值：** 后端由多个独立模块共同支撑完整产品链路。该板块用于说明每个模块负责什么、在主流程中什么时候被调用，以及调试时应该重点验证什么。
+
+#### 3.15.1 后端整体工作流
+
+```text
+main.py / api/index.py
+  -> session_module.py 创建或恢复会话
+  -> questionnaire_module.py 生成问卷、保存答案、提交问卷
+  -> profile_module.py 生成偏好画像解释
+  -> task_repository.py 提供任务库、任务标签、任务轻重分级
+  -> recommendation_module.py 根据偏好、历史、限制生成推荐任务
+  -> scheduling_module.py 把推荐任务排进用户空闲时间
+  -> mvp_orchestrator.py 串联画像、推荐、排程、计划保存、网页交付
+  -> plan_module.py 支持换任务、调时间、跳过、加入推荐任务、自定义任务
+  -> execution_module.py / execution_service.py 记录任务开始、完成、跳过、超时
+  -> feedback_service.py 保存任务反馈
+  -> review_service.py 生成计划复盘
+  -> user_history_service.py / history_insight_service.py 沉淀历史偏好并生成可视化解释
+  -> delivery_module.py 返回网页可展示的计划数据
+```
+
+#### 3.15.2 模块职责说明
+
+| 后端模块 | 核心职责 | 当前已实现能力 | 调试重点 |
+| --- | --- | --- | --- |
+| `main.py` | FastAPI 后端入口 | 注册 Swagger 接口、统一成功/失败响应、装配各服务、处理 CORS 和数据库异常 | 启动后访问 `/docs`、`/health`、`/api/v1/health/database` |
+| `api/index.py` | Vercel Serverless 入口 | 在线部署时复用 `main.py` 的应用；启动失败时返回可读错误 | Vercel 500 时看该入口是否暴露启动错误 |
+| `session_module.py` | 会话模块 | 创建 session、恢复 session、保存偏好、清空会话数据、维护 stage/version/expires_at | 创建会话后应返回 `session_id`、`stage`、`version` |
+| `questionnaire_module.py` | 问卷模块 | 支持 quick/deep 模式、动态选题、保存答案、跳过题目、查看进度、提交问卷 | 问卷题目应根据前置偏好变化，提交后生成答案快照 |
+| `profile_module.py` | 偏好画像模块 | 根据问卷和偏好生成画像、解释用户倾向、输出推荐依据 | `/profile/insight` 应返回画像摘要、维度、解释文字 |
+| `task_repository.py` | 推荐任务库 | 保存公共任务、分类任务、自定义任务、轻松度/体力/社交/预算/地点依赖等标签 | 搜索任务时应能按分类、限制条件、历史排除过滤 |
+| `recommendation_module.py` | 推荐模块 | 根据偏好画像、历史反馈、当前限制给出 10 个推荐任务和推荐理由 | 点击“换一个”不能反复返回当前任务或历史剔除任务 |
+| `recommendation_memory.py` | 推荐记忆模块 | 记录当前会话中不喜欢的任务组、被替换任务、低分任务和调整历史 | 被用户替换或低评分的任务组应进入排除记忆 |
+| `scheduling_module.py` | 排程模块 | 校验空闲时间、锁定任务、任务间隔、休息块、密度策略、重新排程 | 生成计划时任务时间不能重叠，必须落在空闲时间内 |
+| `mvp_orchestrator.py` | 主流程编排模块 | 串联画像、推荐、排程、计划保存和网页交付，形成完整产品工作流 | `/plan/generate` 是主链路调试入口 |
+| `plan_module.py` | 计划管理模块 | 编辑任务时间、换任务、换轻松任务、跳过任务、加入推荐任务、自定义任务、确认计划、重新生成计划 | 每次修改应校验 `expected_version`，避免前端旧数据覆盖新数据 |
+| `execution_module.py` | 执行规则模块 | 定义任务 pending/active/completed/skipped/missed 等状态流转规则 | 开始、完成、跳过任务时状态必须按规则变化 |
+| `execution_service.py` | 执行持久化模块 | 把执行事件写入数据库，刷新超时任务，并同步用户历史 | 完成任务后历史记录和计划项状态都应更新 |
+| `feedback_service.py` | 反馈模块 | 保存任务评分、原因、备注，并把低分反馈写入推荐记忆 | 1-2 分任务后续应被当前会话避开 |
+| `review_service.py` | 复盘模块 | 汇总完成/跳过/替换任务，保存反思，生成复盘建议 | 计划结束后应能看到本次完成情况和复盘状态 |
+| `user_history_service.py` | 用户历史模块 | 创建匿名用户、记录完成/跳过/替换/反馈行为、计算历史偏好权重 | 历史行为应影响后续推荐排序 |
+| `history_insight_service.py` | 历史洞察模块 | 输出本周完成任务、近期计划、常跳过类型、偏好学习说明、下次推荐策略 | 历史计划页应能解释“系统学到了什么” |
+| `delivery_module.py` | 网页交付模块 | 校验计划并生成网页展示 payload，保存 `delivery_jobs` 记录 | 生成计划接口应返回 `delivery.channel = web` 和可渲染 payload |
+
+#### 3.15.3 主要接口和模块对应关系
+
+| 用户动作 | 后端接口 | 主要模块 |
+| --- | --- | --- |
+| 打开产品并恢复进度 | `POST /api/v1/sessions`、`GET /api/v1/sessions/{session_id}` | `session_module.py` |
+| 选择兴趣和空闲条件 | `PUT /api/v1/sessions/{session_id}/preferences` | `session_module.py` |
+| 开始问卷 | `POST /api/v1/sessions/{session_id}/questionnaire/start` | `questionnaire_module.py` |
+| 回答/跳过问卷题 | `PATCH /api/v1/sessions/{session_id}/questionnaire/answers/{question_id}`、`POST /api/v1/sessions/{session_id}/questionnaire/skip/{question_id}` | `questionnaire_module.py` |
+| 提交问卷 | `POST /api/v1/sessions/{session_id}/questionnaire/submit` | `questionnaire_module.py`、`profile_module.py` |
+| 查看偏好画像 | `GET /api/v1/sessions/{session_id}/profile/insight` | `profile_module.py` |
+| 生成计划 | `POST /api/v1/sessions/{session_id}/plan/generate` | `mvp_orchestrator.py`、`recommendation_module.py`、`scheduling_module.py`、`delivery_module.py` |
+| 查看当前计划 | `GET /api/v1/sessions/{session_id}/plan` | `plan_module.py` |
+| 修改任务时间 | `PATCH /api/v1/plans/{plan_id}/items/{item_id}`、`POST /api/v1/plans/{plan_id}/items/{item_id}/adjust` | `plan_module.py`、`scheduling_module.py` |
+| 更换任务 | `POST /api/v1/plans/{plan_id}/items/{item_id}/replace`、`POST /api/v1/plans/{plan_id}/items/{item_id}/replace-easier` | `plan_module.py`、`recommendation_module.py`、`recommendation_memory.py` |
+| 加入推荐任务 | `POST /api/v1/plans/{plan_id}/recommended-tasks/{task_id}` | `plan_module.py` |
+| 开始/完成/跳过任务 | `/execution/start`、`/execution/complete`、`/execution/skip` | `execution_module.py`、`execution_service.py`、`user_history_service.py` |
+| 提交任务反馈 | `POST /api/v1/plans/{plan_id}/items/{item_id}/feedback` | `feedback_service.py`、`recommendation_memory.py` |
+| 查看历史学习结果 | `GET /api/v1/users/{user_id}/history/insight` | `history_insight_service.py` |
+| 查看计划复盘 | `GET /api/v1/plans/{plan_id}/review` | `review_service.py` |
+
+#### 3.15.4 后端验收标准
+
+- 本地后端能通过 `uvicorn main:app --host 127.0.0.1 --port 8000` 启动。
+- `/docs` 能正常展示所有接口。
+- `/api/v1/health/database` 返回数据库可用。
+- 创建会话、保存偏好、开始问卷、提交问卷、生成计划可以连续跑通。
+- 生成计划后至少返回 10 个推荐任务，并包含推荐理由和任务标签。
+- 任务时间可以被用户手动修改，修改后计划版本号递增。
+- 点击“换一个”时不会返回当前任务，也不会在当前会话中反复返回已经被替换掉的任务。
+- 用户低评分或跳过的任务类型，会进入当前会话推荐记忆。
+- 完成、跳过、替换任务后，历史计划与偏好学习接口能看到对应记录。
+- 计划复盘页能展示完成任务、跳过任务、替换任务和建议。
+
 ---
 
 ## 4. 当前不在 MVP 范围内的功能
