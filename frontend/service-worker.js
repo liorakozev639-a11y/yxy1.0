@@ -1,16 +1,16 @@
-const CACHE_NAME = 'free-time-agent-pwa-v2';
+const CACHE_NAME = 'free-time-agent-pwa-v3';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=pixel-v8',
-  './config.js?v=pwa-v1',
-  './api.js?v=pixel-v8',
-  './flow.js?v=pixel-v8',
-  './app.js?v=pixel-v8',
+  './styles.css?v=pixel-v9',
+  './config.js?v=pwa-v2',
+  './api.js?v=pixel-v9',
+  './flow.js?v=pixel-v9',
+  './app.js?v=pixel-v9',
   './pixel-companions.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './manifest.json?v=pwa-v1',
+  './manifest.json?v=pwa-v2',
 ];
 
 function networkOnly(request) {

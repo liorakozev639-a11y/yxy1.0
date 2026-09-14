@@ -10,9 +10,9 @@ test('frontend declares installable PWA metadata and runtime config', () => {
   const index = read('index.html');
   const manifest = JSON.parse(read('manifest.json'));
 
-  assert.match(index, /<link rel="manifest" href="manifest\.json\?v=pwa-v1">/);
+  assert.match(index, /<link rel="manifest" href="manifest\.json\?v=pwa-v2">/);
   assert.match(index, /<meta name="apple-mobile-web-app-capable" content="yes">/);
-  assert.match(index, /config\.js\?v=pwa-v1/);
+  assert.match(index, /config\.js\?v=pwa-v2/);
   assert.equal(manifest.name, '留白计划');
   assert.equal(manifest.short_name, '留白计划');
   assert.equal(manifest.start_url, './');
@@ -27,10 +27,11 @@ test('service worker caches the app shell without caching API calls', () => {
 
   assert.match(worker, /const APP_SHELL/);
   assert.match(worker, /index\.html/);
-  assert.match(worker, /styles\.css\?v=pixel-v8/);
-  assert.match(worker, /api\.js\?v=pixel-v8/);
-  assert.match(worker, /flow\.js\?v=pixel-v8/);
-  assert.match(worker, /app\.js\?v=pixel-v8/);
+  assert.match(worker, /free-time-agent-pwa-v3/);
+  assert.match(worker, /styles\.css\?v=pixel-v9/);
+  assert.match(worker, /api\.js\?v=pixel-v9/);
+  assert.match(worker, /flow\.js\?v=pixel-v9/);
+  assert.match(worker, /app\.js\?v=pixel-v9/);
   assert.match(worker, /icons\/icon-192\.png/);
   assert.match(worker, /icons\/icon-512\.png/);
   assert.match(worker, /request\.url\.includes\('\/api\/v1\/'\)/);
