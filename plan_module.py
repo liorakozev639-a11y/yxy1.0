@@ -23,7 +23,7 @@ from recommendation_module import (
     calculate_match_score,
     select_adjusted_task,
 )
-from task_repository import CATEGORIES, Task, TaskRepository
+from task_repository import CATEGORIES, Task, TaskRepository, feedback_groups_for_task_ids
 
 
 logger = logging.getLogger(__name__)
@@ -536,6 +536,11 @@ class PlanManagementService:
             self.memory.record_task_adjustment(session_id, current["task_id"], "replace")
         used_ids.update(self._replacement_excluded_task_ids(session_id))
         candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+        current_history_ids = set(normalize_replacement_history(current.get("replacement_history")))
+        if current.get("task_id"):
+            current_history_ids.add(current["task_id"])
+        excluded_groups = self._replacement_excluded_groups(session_id, user_id)
+        excluded_groups.update(feedback_groups_for_task_ids(candidates, current_history_ids))
         candidate = select_replacement_task(
             candidates=candidates,
             category=current["category"],
@@ -545,7 +550,7 @@ class PlanManagementService:
             outing=session.preferences.get("outing", "any"),
             company=session.preferences.get("company", "both"),
             preferred_task_id=replacement_task_id,
-            excluded_feedback_groups=self._replacement_excluded_groups(session_id, user_id),
+            excluded_feedback_groups=excluded_groups,
         )
         if candidate is None:
             raise HTTPException(
@@ -606,13 +611,18 @@ class PlanManagementService:
         used_ids.update(normalize_replacement_history(current.get("replacement_history")))
         used_ids.update(self._replacement_excluded_task_ids(session_id))
         candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+        current_history_ids = set(normalize_replacement_history(current.get("replacement_history")))
+        if current.get("task_id"):
+            current_history_ids.add(current["task_id"])
+        excluded_groups = self._replacement_excluded_groups(session_id, user_id)
+        excluded_groups.update(feedback_groups_for_task_ids(candidates, current_history_ids))
         candidate = select_adjusted_task(
             candidates=candidates,
             current_task=current_task,
             adjustment=adjustment,
             used_task_ids=used_ids,
             constraints=constraints,
-            excluded_feedback_groups=self._replacement_excluded_groups(session_id, user_id),
+            excluded_feedback_groups=excluded_groups,
         )
         if candidate is None:
             raise HTTPException(status_code=409, detail="当前没有更合适的任务")
@@ -655,11 +665,16 @@ class PlanManagementService:
             self.memory.record_task_adjustment(session_id, current["task_id"], "easier")
         used_ids.update(self._replacement_excluded_task_ids(session_id))
         candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+        current_history_ids = set(normalize_replacement_history(current.get("replacement_history")))
+        if current.get("task_id"):
+            current_history_ids.add(current["task_id"])
+        excluded_groups = self._replacement_excluded_groups(session_id, user_id)
+        excluded_groups.update(feedback_groups_for_task_ids(candidates, current_history_ids))
         candidate = select_easier_replacement_task(
             candidates=candidates,
             category=current["category"],
             used_task_ids=used_ids,
-            excluded_feedback_groups=self._replacement_excluded_groups(session_id, user_id),
+            excluded_feedback_groups=excluded_groups,
         )
         if candidate is None:
             raise HTTPException(status_code=409, detail="该分类没有更轻松的可用任务")

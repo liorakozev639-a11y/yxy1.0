@@ -409,6 +409,19 @@ def feedback_group_for(task_id: str, category: str) -> str:
     return groups[(int(task_id.rsplit("_", 1)[1]) - 1) % len(groups)]
 
 
+def feedback_groups_for_task_ids(candidates: list[Task], task_ids: set[str]) -> set[str]:
+    lookup = {
+        task.id: task.feedback_group
+        for task in candidates
+        if task.feedback_group
+    }
+    return {
+        lookup[task_id]
+        for task_id in task_ids
+        if task_id in lookup
+    }
+
+
 def _clamp_level(value: int) -> int:
     return max(1, min(5, value))
 

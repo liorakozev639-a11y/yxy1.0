@@ -25,7 +25,7 @@ from recommendation_module import (
 from scheduling_module import PlanDraft, PlanItem as ScheduleItem
 from scheduling_module import Task as ScheduleTask
 from scheduling_module import build_schedule
-from task_repository import CATEGORIES, TaskRepository
+from task_repository import CATEGORIES, TaskRepository, feedback_groups_for_task_ids
 
 
 CATEGORY_ALIASES = {
@@ -600,6 +600,7 @@ class MVPOrchestrator:
             categories=[current_task.category],
             scenarios=constraints.get("scenarios"),
         )
+        excluded_groups.update(feedback_groups_for_task_ids(candidates, excluded_task_ids))
         candidate = select_adjusted_task(
             candidates=candidates,
             current_task=current_task,

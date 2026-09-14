@@ -4,7 +4,7 @@ import unittest
 
 from recommendation_module import select_adjusted_task
 from plan_module import build_replaced_item, select_replacement_task
-from task_repository import Task
+from task_repository import Task, feedback_groups_for_task_ids
 
 
 class PlanReplacementRuleTests(unittest.TestCase):
@@ -88,6 +88,56 @@ class PlanReplacementRuleTests(unittest.TestCase):
             excluded_feedback_groups={"explore_food_drink"},
         )
 
+        self.assertIsNotNone(replacement)
+        self.assertEqual(replacement.id, "fresh")
+
+    def test_feedback_groups_for_task_ids_maps_seen_tasks_to_similar_groups(self) -> None:
+        tasks = [
+            Task(
+                "current",
+                "原任务",
+                "乐享探索",
+                20,
+                0,
+                "home",
+                "solo",
+                feedback_group="explore_game_relax",
+            ),
+            Task(
+                "similar",
+                "相似任务",
+                "乐享探索",
+                20,
+                0,
+                "home",
+                "solo",
+                feedback_group="explore_game_relax",
+            ),
+            Task(
+                "fresh",
+                "真正的新任务",
+                "乐享探索",
+                20,
+                0,
+                "home",
+                "solo",
+                feedback_group="explore_local_browse",
+            ),
+        ]
+
+        excluded_groups = feedback_groups_for_task_ids(tasks, {"current"})
+        replacement = select_replacement_task(
+            candidates=tasks,
+            category="乐享探索",
+            used_task_ids={"current"},
+            budget_limit=20,
+            max_duration=30,
+            outing="home",
+            company="solo",
+            excluded_feedback_groups=excluded_groups,
+        )
+
+        self.assertEqual(excluded_groups, {"explore_game_relax"})
         self.assertIsNotNone(replacement)
         self.assertEqual(replacement.id, "fresh")
 
