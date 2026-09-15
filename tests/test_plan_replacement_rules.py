@@ -61,6 +61,39 @@ class PlanReplacementRuleTests(unittest.TestCase):
 
         self.assertIsNone(replacement)
 
+    def test_select_adjusted_task_falls_back_when_only_similar_unseen_tasks_remain(self) -> None:
+        tasks = [
+            Task(
+                "current", "当前任务", "活力充电", 45, 20, "home", "solo",
+                feedback_group="same",
+            ),
+            Task(
+                "seen", "历史任务", "活力充电", 30, 0, "home", "solo",
+                feedback_group="other",
+            ),
+            Task(
+                "unseen_similar", "未出现过的同组任务", "活力充电", 20, 0, "home", "solo",
+                feedback_group="same",
+            ),
+        ]
+
+        replacement = select_adjusted_task(
+            candidates=tasks,
+            current_task=tasks[0],
+            adjustment="shorter",
+            used_task_ids={"current", "seen"},
+            constraints={
+                "budget_limit": 20,
+                "max_duration": 60,
+                "outing": "home",
+                "company": "solo",
+            },
+            excluded_feedback_groups={"same", "other"},
+        )
+
+        self.assertIsNotNone(replacement)
+        self.assertEqual(replacement.id, "unseen_similar")
+
     def test_select_replacement_excludes_history_and_feedback_group(self) -> None:
         tasks = [
             Task(
@@ -90,6 +123,54 @@ class PlanReplacementRuleTests(unittest.TestCase):
 
         self.assertIsNotNone(replacement)
         self.assertEqual(replacement.id, "fresh")
+
+    def test_select_replacement_falls_back_when_only_similar_unseen_tasks_remain(self) -> None:
+        tasks = [
+            Task(
+                "current",
+                "当前任务",
+                "乐享探索",
+                20,
+                0,
+                "home",
+                "solo",
+                feedback_group="explore_game_relax",
+            ),
+            Task(
+                "seen",
+                "历史任务",
+                "乐享探索",
+                20,
+                0,
+                "home",
+                "solo",
+                feedback_group="explore_local_browse",
+            ),
+            Task(
+                "unseen_similar",
+                "未出现过的同组任务",
+                "乐享探索",
+                20,
+                0,
+                "home",
+                "solo",
+                feedback_group="explore_game_relax",
+            ),
+        ]
+
+        replacement = select_replacement_task(
+            candidates=tasks,
+            category="乐享探索",
+            used_task_ids={"current", "seen"},
+            budget_limit=20,
+            max_duration=30,
+            outing="home",
+            company="solo",
+            excluded_feedback_groups={"explore_game_relax", "explore_local_browse"},
+        )
+
+        self.assertIsNotNone(replacement)
+        self.assertEqual(replacement.id, "unseen_similar")
 
     def test_feedback_groups_for_task_ids_maps_seen_tasks_to_similar_groups(self) -> None:
         tasks = [

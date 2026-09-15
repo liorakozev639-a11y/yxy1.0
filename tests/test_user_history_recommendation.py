@@ -72,6 +72,23 @@ class HistoryAwareRecommendationTest(unittest.TestCase):
         self.assertIsNotNone(replacement)
         self.assertEqual(replacement.id, "fresh")
 
+    def test_easier_replacement_falls_back_when_only_similar_unseen_tasks_remain(self) -> None:
+        candidates = [
+            Task("current", "当前任务", "活力充电", 30, 0, "home", "solo", feedback_group="same"),
+            Task("seen", "历史任务", "活力充电", 25, 0, "home", "solo", feedback_group="other"),
+            Task("unseen_similar", "未出现过的同组任务", "活力充电", 10, 0, "home", "solo", feedback_group="same"),
+        ]
+
+        replacement = select_easier_replacement_task(
+            candidates=candidates,
+            category="活力充电",
+            used_task_ids={"current", "seen"},
+            excluded_feedback_groups={"same", "other"},
+        )
+
+        self.assertIsNotNone(replacement)
+        self.assertEqual(replacement.id, "unseen_similar")
+
 
 if __name__ == "__main__":
     unittest.main()

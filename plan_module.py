@@ -60,22 +60,13 @@ def select_replacement_task(
     excluded_feedback_groups: set[str] | None = None,
 ) -> Task | None:
     excluded = excluded_feedback_groups or set()
-    available = [
+    base_available = [
         task
         for task in candidates
         if task.status == "approved"
         and task.category == category
         and task.id not in used_task_ids
-        and task.feedback_group not in excluded
     ]
-    if preferred_task_id:
-        preferred = next(
-            (task for task in available if task.id == preferred_task_id),
-            None,
-        )
-        if preferred is not None:
-            return preferred
-
     tiers = (
         lambda task: (
             task.budget <= budget_limit
@@ -92,10 +83,28 @@ def select_replacement_task(
         lambda task: task.duration <= max_duration,
         lambda task: True,
     )
-    for predicate in tiers:
-        matches = [task for task in available if predicate(task)]
-        if matches:
-            return sorted(matches, key=lambda task: (task.duration, task.budget, task.id))[0]
+
+    def choose_from(pool: list[Task]) -> Task | None:
+        if preferred_task_id:
+            preferred = next(
+                (task for task in pool if task.id == preferred_task_id),
+                None,
+            )
+            if preferred is not None:
+                return preferred
+        for predicate in tiers:
+            matches = [task for task in pool if predicate(task)]
+            if matches:
+                return sorted(matches, key=lambda task: (task.duration, task.budget, task.id))[0]
+        return None
+
+    strict_available = [
+        task for task in base_available if task.feedback_group not in excluded
+    ]
+    strict_choice = choose_from(strict_available)
+    if strict_choice is not None:
+        return strict_choice
+    return choose_from(base_available)
     return None
 
 
@@ -107,27 +116,35 @@ def select_easier_replacement_task(
     excluded_feedback_groups: set[str] | None = None,
 ) -> Task | None:
     excluded = excluded_feedback_groups or set()
-    available = [
+    base_available = [
         task
         for task in candidates
         if task.status == "approved"
         and task.category == category
         and task.id not in used_task_ids
-        and task.feedback_group not in excluded
     ]
     outing_rank = {"home": 0, "nearby": 1, "city": 2}
     company_rank = {"solo": 0, "both": 1, "group": 2}
-    return min(
-        available,
-        key=lambda task: (
-            task.duration,
-            task.budget,
-            outing_rank.get(task.outing, 3),
-            company_rank.get(task.company, 3),
-            task.id,
-        ),
-        default=None,
+
+    def choose_from(pool: list[Task]) -> Task | None:
+        return min(
+            pool,
+            key=lambda task: (
+                task.duration,
+                task.budget,
+                outing_rank.get(task.outing, 3),
+                company_rank.get(task.company, 3),
+                task.id,
+            ),
+            default=None,
+        )
+
+    strict_choice = choose_from(
+        [task for task in base_available if task.feedback_group not in excluded]
     )
+    if strict_choice is not None:
+        return strict_choice
+    return choose_from(base_available)
 
 
 def normalize_replacement_history(value: Any) -> list[str]:

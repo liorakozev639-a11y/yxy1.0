@@ -177,21 +177,29 @@ def select_adjusted_task(
     """Choose a same-category task that better matches one adjustment intent."""
     constraints = constraints or {}
     excluded = excluded_feedback_groups or set()
-    available = [
+    base_available = [
         task
         for task in candidates
         if task.status == "approved"
         and task.category == current_task.category
         and task.id not in used_task_ids
-        and task.feedback_group not in excluded
         and _task_matches_hard_constraints(task, constraints)
         and _task_improves_intent(task, current_task, adjustment)
     ]
-    return min(
-        available,
-        key=lambda task: _adjustment_sort_key(task, current_task, adjustment),
-        default=None,
+
+    def choose_from(pool: list[Task]) -> Task | None:
+        return min(
+            pool,
+            key=lambda task: _adjustment_sort_key(task, current_task, adjustment),
+            default=None,
+        )
+
+    strict_choice = choose_from(
+        [task for task in base_available if task.feedback_group not in excluded]
     )
+    if strict_choice is not None:
+        return strict_choice
+    return choose_from(base_available)
 
 
 def build_adjustment_reason(current_task: Task, replacement: Task, adjustment: str) -> str:
