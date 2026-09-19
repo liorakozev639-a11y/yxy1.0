@@ -219,6 +219,24 @@ test('planFailureRecoveryOptions converts backend 409 details into actionable fi
   });
 });
 
+test('mock task reasons have no fabricated score and retain source evidence', () => {
+  const summary = taskReasonSummary({
+    category: '松弛疗愈',
+    generation_mode: 'mock',
+    match_score: null,
+    reason_text: '适合当前预算。',
+    generation_reason: '根据本次兴趣方向生成。',
+    recommendation_reason: '可在家完成。',
+    first_action: '找一个安静位置。',
+    prerequisites: [],
+    evidence_refs: ['preference.categories', 'profile:松弛疗愈'],
+  });
+  assert.equal(summary.generationMode, 'mock');
+  assert.equal(summary.matchScore, null);
+  assert.equal(summary.firstAction, '找一个安静位置。');
+  assert.deepEqual(summary.evidenceRefs, ['preference.categories', 'profile:松弛疗愈']);
+});
+
 test('lifeContextSummary converts real-life constraints into readable labels', () => {
   assert.deepEqual(lifeContextSummary({
     weather: 'rainy',

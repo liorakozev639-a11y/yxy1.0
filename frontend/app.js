@@ -421,7 +421,9 @@
     return `<div class="recommendation-explain" aria-label="推荐理由">
       <div class="recommendation-explain-title">
         <strong>为什么适合现在</strong>
-        <span class="recommendation-score-pill">推荐可信度 ${escapeHtml(score)}</span>
+        ${summary.generationMode === 'mock'
+          ? '<span class="recommendation-score-pill">模拟生成</span>'
+          : `<span class="recommendation-score-pill">推荐可信度 ${escapeHtml(score)}</span>`}
       </div>
       <p>${escapeHtml(text)}</p>
     </div>`;
@@ -547,6 +549,12 @@
     const item = items.find((entry) => entry.id === state.detailItemId);
     if (!item) return '';
     const summary = flow.taskReasonSummary(item);
+    const evidenceLabels = summary.evidenceRefs.map((ref) => {
+      if (ref === 'preference.categories') return '本次选择的兴趣方向';
+      if (ref.startsWith('profile:')) return `问卷画像：${ref.slice('profile:'.length)}`;
+      if (ref.startsWith('question:')) return `问卷回答：${ref.slice('question:'.length)}`;
+      return `本次填写的${ref.replace('preference.', '')}`;
+    });
     return `<div class="detail-backdrop" data-action="close-detail">
       <article class="detail-dialog" role="dialog" aria-modal="true" aria-label="任务推荐理由" onclick="event.stopPropagation()">
         <div class="detail-header">
@@ -554,14 +562,18 @@
           <button class="icon-button" data-action="close-detail" aria-label="关闭详情"><i data-lucide="x"></i></button>
         </div>
         ${reasonTags(item)}
-        <div class="reason-score-row">
+        ${summary.generationMode === 'mock' ? '' : `<div class="reason-score-row">
           <span>匹配分</span>
           <strong>${summary.matchScore === null ? '--' : Math.round(summary.matchScore * 100)}</strong>
-        </div>
+        </div>`}
         ${loadProfile(summary)}
         ${summary.matchedPreferences.length ? `<div class="matched-preferences">${summary.matchedPreferences.map((entry) => `<span>${escapeHtml(entry)}</span>`).join('')}</div>` : ''}
         ${summary.warningText ? `<div class="warning-note">${escapeHtml(summary.warningText)}</div>` : ''}
-        <div class="reason-text">${escapeHtml(summary.text).replace(/\n/g, '<br>')}</div>
+        ${summary.firstAction ? `<div class="reason-text"><strong>第一步：</strong>${escapeHtml(summary.firstAction)}</div>` : ''}
+        ${summary.prerequisites.length ? `<div class="reason-text"><strong>前置条件：</strong>${escapeHtml(summary.prerequisites.join('、'))}</div>` : ''}
+        ${summary.generationReason ? `<div class="reason-text"><strong>任务生成依据：</strong>${escapeHtml(summary.generationReason)}</div>` : ''}
+        <div class="reason-text">${summary.recommendationReason ? `<strong>推荐原因：</strong>${escapeHtml(summary.recommendationReason)}` : escapeHtml(summary.text).replace(/\n/g, '<br>')}</div>
+        ${evidenceLabels.length ? `<div class="matched-preferences">${evidenceLabels.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>` : ''}
       </article>
     </div>`;
   }
@@ -652,7 +664,7 @@
       : '';
     return `<article class="timeline-item pixel-timeline-item recommended-task-card status-${escapeHtml(status)} ${item.recommendationOnly ? 'is-recommendation-only' : ''} ${status === 'skipped' ? 'is-skipped' : ''}">
       <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${time}</div>
-      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span class="pixel-task-meta-line">${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${recommendationExplain(item)}${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
+      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span class="pixel-task-meta-line">${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${recommendationExplain(item)}${item.first_action ? `<p class="mock-first-action"><strong>第一步</strong> ${escapeHtml(item.first_action)}</p>` : ''}${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
         ${executionActions(item, plan)}
         ${detailButton}
         ${editButton}

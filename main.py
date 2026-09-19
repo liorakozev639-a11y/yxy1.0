@@ -33,6 +33,8 @@ from plan_module import PlanManagementService
 from recommendation_memory import RecommendationMemory
 from session_module import PostgresSessionRepository, SessionService
 from task_repository import TaskRepository
+from generated_task_repository import PostgresGeneratedTaskRepository
+from mock_task_service import MockTaskGenerationService
 from user_history_service import UserHistoryService
 
 ALLOWED_ORIGINS = [
@@ -192,10 +194,20 @@ def build_orchestrator(
     database_url = os.getenv("SESSION_DATABASE_URL")
     if not database_url:
         raise RuntimeError("启动整合服务前必须设置 SESSION_DATABASE_URL")
+    generation_mode = os.getenv("TASK_GENERATION_MODE", "rules")
+    if generation_mode not in {"rules", "mock"}:
+        raise ValueError("TASK_GENERATION_MODE 只支持 rules 或 mock")
+    if generation_mode == "mock" and os.getenv("VERCEL"):
+        raise RuntimeError("模拟生成模式只能在本地测试环境使用")
+    mock_generation = (
+        MockTaskGenerationService(PostgresGeneratedTaskRepository(database_url))
+        if generation_mode == "mock"
+        else None
+    )
     return MVPOrchestrator(
         sessions=session_service,
         questionnaire=questionnaire_service,
-        tasks=TaskRepository(),
+        tasks=TaskRepository() if generation_mode == "rules" else None,
         profiles=PostgreSQLProfileRepository(database_url),
         plans=PostgreSQLPlanRepository(database_url),
         delivery=WebDeliveryService(
@@ -203,7 +215,14 @@ def build_orchestrator(
         ),
         memory=memory,
         user_history=user_history,
+        mock_generation=mock_generation,
     )
+
+
+def require_orchestrator(orchestrator: Optional[MVPOrchestrator]) -> MVPOrchestrator:
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="推荐服务未配置")
+    return orchestrator
 
 
 def create_app(
@@ -571,7 +590,7 @@ def create_app(
         task_id: str,
         body: RecommendationAdjustInput,
     ) -> dict[str, Any]:
-        orchestrator_service = require_orchestrator()
+        orchestrator_service = require_orchestrator(orchestrator)
         return success(
             orchestrator_service.adjust_recommendation(
                 session_id,

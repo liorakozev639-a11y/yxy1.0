@@ -883,6 +883,8 @@ body.pixel-body {
 .reflection-choice.is-selected { background: var(--pixel-yellow); box-shadow: 2px 2px 0 var(--pixel-line); }
 .review-suggestions { margin: 16px 0; padding: 12px; border-top: 2px dashed var(--pixel-line); background: #f5f0d7; }
 .review-suggestions p { margin: 6px 0 0; color: var(--pixel-ink); font-size: 13px; }
+.mock-first-action { margin: 8px 0 12px; color: var(--pixel-ink); font-size: 14px; line-height: 1.6; }
+.mock-first-action strong { margin-right: 8px; color: var(--teal-dark); }
 
 @media (max-width: 820px) {
   .pixel-plan-layout { grid-template-columns: 1fr; }

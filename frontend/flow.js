@@ -55,7 +55,9 @@
       text: item && item.reason_text
         ? item.reason_text
         : `该任务覆盖「${category}」，并已进入当前计划。`,
-      matchScore: Number.isFinite(Number(item && item.match_score))
+      matchScore: item && item.generation_mode === 'mock'
+        ? null
+        : item && item.match_score != null && Number.isFinite(Number(item.match_score))
         ? Number(item.match_score)
         : null,
       matchedPreferences: Array.isArray(item && item.matched_preferences)
@@ -64,6 +66,12 @@
       loadProfile,
       warningText: item && item.warning_text ? item.warning_text : '',
       replacementReason: item && item.replacement_reason ? item.replacement_reason : '',
+      generationMode: item && item.generation_mode ? item.generation_mode : null,
+      generationReason: item && item.generation_reason ? item.generation_reason : '',
+      recommendationReason: item && item.recommendation_reason ? item.recommendation_reason : '',
+      firstAction: item && item.first_action ? item.first_action : '',
+      prerequisites: Array.isArray(item && item.prerequisites) ? item.prerequisites : [],
+      evidenceRefs: Array.isArray(item && item.evidence_refs) ? item.evidence_refs : [],
     };
   }
 
