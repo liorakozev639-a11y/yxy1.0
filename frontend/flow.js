@@ -193,32 +193,39 @@
 
   function mergeRecommendedItems(items, recommendedTasks) {
     const planItems = Array.isArray(items) ? items : [];
+    const recommendations = Array.isArray(recommendedTasks) ? recommendedTasks : [];
+    const recommendedTaskIds = new Set(recommendations.map((task) => task.id));
     const scheduledByTaskId = new Map(
       planItems
         .filter((item) => item.kind === 'task' && item.task_id)
         .map((item) => [item.task_id, item]),
     );
     const replacementByPreviousTaskId = new Map();
+    const anchoredItemIds = new Set();
     planItems
       .filter((item) => item.kind === 'task' && item.task_id)
       .forEach((item) => {
         const history = Array.isArray(item.replacement_history)
           ? item.replacement_history
           : [];
-        history.forEach((taskId) => {
-          if (taskId !== item.task_id) {
-            replacementByPreviousTaskId.set(taskId, item);
-          }
-        });
+        const originalTaskId = history.find((taskId) => (
+          taskId !== item.task_id && recommendedTaskIds.has(taskId)
+        ));
+        if (originalTaskId) {
+          replacementByPreviousTaskId.set(originalTaskId, item);
+          anchoredItemIds.add(item.id);
+        }
       });
 
-    return (Array.isArray(recommendedTasks) ? recommendedTasks : []).flatMap((task, index) => {
+    return recommendations.flatMap((task, index) => {
       const scheduled = scheduledByTaskId.get(task.id);
-      const replacement = scheduled || replacementByPreviousTaskId.get(task.id);
-      if (replacement) {
+      const replacement = replacementByPreviousTaskId.get(task.id);
+      if (scheduled && anchoredItemIds.has(scheduled.id) && !replacement) return [];
+      const displayedItem = replacement || scheduled;
+      if (displayedItem) {
         return [{
           ...task,
-          ...replacement,
+          ...displayedItem,
           recommendationIndex: index,
           recommendationOnly: false,
         }];
