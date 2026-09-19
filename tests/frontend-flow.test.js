@@ -178,6 +178,33 @@ test('mergeRecommendedItems replaces stale recommendation cards after a task rep
   assert.equal(merged.some((item) => item.task_id === 'task_old'), false);
 });
 
+test('mergeRecommendedItems shows a replacement only once when it was also recommended', () => {
+  const items = [{
+    id: 'item_new',
+    task_id: 'task_new',
+    title: '新的任务',
+    category: '活力充电',
+    kind: 'task',
+    status: 'pending',
+    replacement_history: ['task_old', 'task_new'],
+  }];
+  const recommendations = [
+    { id: 'task_new', title: '新的任务', category: '活力充电' },
+    { id: 'task_other', title: '其他任务', category: '活力充电' },
+    { id: 'task_old', title: '旧任务', category: '活力充电' },
+  ];
+
+  const merged = mergeRecommendedItems(items, recommendations);
+
+  assert.deepEqual(merged.map((item) => item.task_id), ['task_other', 'task_new']);
+  assert.equal(merged.filter((item) => item.id === 'item_new').length, 1);
+  assert.equal(merged[1].recommendationOnly, false);
+
+  const originalFirst = mergeRecommendedItems(items, [...recommendations].reverse());
+  assert.deepEqual(originalFirst.map((item) => item.task_id), ['task_new', 'task_other']);
+  assert.equal(originalFirst.filter((item) => item.id === 'item_new').length, 1);
+});
+
 test('feedbackReasonOptions switches to dislike reasons for low ratings', () => {
   assert.deepEqual(feedbackReasonOptions(2), [
     '太累',
