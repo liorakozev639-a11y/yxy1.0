@@ -1,12 +1,12 @@
-const CACHE_NAME = 'free-time-agent-pwa-v3';
+const CACHE_NAME = 'free-time-agent-pwa-v4';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=pixel-v9',
+  './styles.css?v=pixel-v10',
   './config.js?v=pwa-v2',
-  './api.js?v=pixel-v9',
-  './flow.js?v=pixel-v9',
-  './app.js?v=pixel-v9',
+  './api.js?v=pixel-v10',
+  './flow.js?v=pixel-v10',
+  './app.js?v=pixel-v10',
   './pixel-companions.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -37,6 +37,10 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET' || request.url.includes('/api/v1/') || request.url.endsWith('/health')) {
     event.respondWith(networkOnly(request));
+    return;
+  }
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => caches.match('./')));
     return;
   }
   event.respondWith(
