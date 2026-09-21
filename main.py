@@ -36,6 +36,8 @@ from task_repository import TaskRepository
 from generated_task_repository import PostgresGeneratedTaskRepository
 from mock_task_service import MockTaskGenerationService
 from user_history_service import UserHistoryService
+from candidate_provider import TaskBankProvider
+from quick_recommendation_service import QuickRecommendationService
 
 ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
@@ -151,6 +153,17 @@ class ReflectionInput(BaseModel):
     sentiment: Literal["satisfied", "neutral", "dissatisfied"]
 
 
+class QuickRecommendationInput(BaseModel):
+    available_minutes: int = Field(ge=1, le=480)
+    energy_level: Literal["low", "medium", "high"]
+    user_id: str = Field(min_length=1)
+
+
+class QuickFeedbackInput(BaseModel):
+    action: Literal["liked", "disliked", "rest_selected"]
+    task_id: str | None = None
+
+
 def success(data: Any) -> dict[str, Any]:
     """
 
@@ -236,6 +249,7 @@ def create_app(
     memory: Optional[RecommendationMemory] = None,
     user_history: Optional[UserHistoryService] = None,
     history_insight: Optional[HistoryInsightService] = None,
+    quick_service: Optional[QuickRecommendationService] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
@@ -256,6 +270,17 @@ def create_app(
         user_history = UserHistoryService(database_url, TaskRepository())
     if history_insight is None and database_url:
         history_insight = HistoryInsightService(database_url)
+    if (
+        quick_service is None
+        and isinstance(session_service, SessionService)
+        and isinstance(user_history, UserHistoryService)
+    ):
+        quick_service = QuickRecommendationService(
+            session_service,
+            TaskBankProvider(TaskRepository()),
+            user_history.quick_store,
+            user_history,
+        )
     if orchestrator is None:
         orchestrator = build_orchestrator(
             session_service,
@@ -412,6 +437,34 @@ def create_app(
     @app.get("/api/v1/sessions/{session_id}")
     def get_session(session_id: str) -> dict[str, Any]:
         return success(session_service.restore(session_id))
+
+    def require_quick_service() -> QuickRecommendationService:
+        if quick_service is None:
+            raise HTTPException(status_code=503, detail="极简推荐服务未配置")
+        return quick_service
+
+    @app.post("/api/v1/sessions/{session_id}/quick-recommendations")
+    def generate_quick_recommendations(
+        session_id: str,
+        body: QuickRecommendationInput,
+    ) -> dict[str, Any]:
+        return success(require_quick_service().generate(
+            session_id, body.user_id, body.available_minutes, body.energy_level,
+        ))
+
+    @app.get("/api/v1/sessions/{session_id}/quick-recommendations/latest")
+    def get_latest_quick_recommendations(session_id: str) -> dict[str, Any]:
+        return success(require_quick_service().latest(session_id))
+
+    @app.post("/api/v1/sessions/{session_id}/quick-recommendations/{run_id}/feedback")
+    def save_quick_feedback(
+        session_id: str,
+        run_id: str,
+        body: QuickFeedbackInput,
+    ) -> dict[str, Any]:
+        return success(require_quick_service().feedback(
+            session_id, run_id, body.action, body.task_id,
+        ))
 
     @app.put("/api/v1/sessions/{session_id}/preferences")
     def save_preferences(
