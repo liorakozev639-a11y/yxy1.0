@@ -1,12 +1,12 @@
-const CACHE_NAME = 'free-time-agent-pwa-v4';
+const CACHE_NAME = 'free-time-agent-pwa-v5';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=pixel-v10',
+  './styles.css?v=pixel-v11',
   './config.js?v=pwa-v2',
-  './api.js?v=pixel-v10',
-  './flow.js?v=pixel-v10',
-  './app.js?v=pixel-v10',
+  './api.js?v=pixel-v11',
+  './flow.js?v=pixel-v11',
+  './app.js?v=pixel-v11',
   './pixel-companions.png',
   './icons/icon-192.png',
   './icons/icon-512.png',

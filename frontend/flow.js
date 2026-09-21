@@ -244,7 +244,25 @@
     });
   }
 
+  function selectQuickTask(run, taskId) {
+    const tasks = [run.primary_task, ...(run.alternatives || [])].filter(Boolean);
+    const selected = tasks.find((task) => task.id === taskId);
+    if (!selected) return run;
+    return {
+      ...run,
+      primary_task: selected,
+      alternatives: tasks.filter((task) => task.id !== taskId),
+    };
+  }
+
+  function afterQuickDislike(run, taskId) {
+    const tasks = [run.primary_task, ...(run.alternatives || [])]
+      .filter((task) => task && task.id !== taskId);
+    return { ...run, primary_task: tasks[0] || null, alternatives: tasks.slice(1) };
+  }
+
   return {
+    afterQuickDislike,
     buildPlanShareText,
     feedbackReasonOptions,
     firstUnansweredIndex,
@@ -254,6 +272,7 @@
     planFailureRecoveryOptions,
     recoverInitialization,
     resumeDestination,
+    selectQuickTask,
     taskReasonSummary,
   };
 }));
