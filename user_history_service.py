@@ -8,6 +8,7 @@ import psycopg
 from fastapi import HTTPException
 from psycopg.rows import dict_row
 
+from quick_recommendation_store import QuickRecommendationStore
 from task_repository import TaskRepository
 
 
@@ -29,6 +30,7 @@ class UserHistoryService:
         self.database_url = database_url
         self.tasks = tasks or TaskRepository()
         self.init_schema()
+        self.quick_store = QuickRecommendationStore(database_url)
 
     def _connect(self):
         return psycopg.connect(self.database_url)
@@ -254,6 +256,28 @@ class UserHistoryService:
             "avoided_group_count": int(counts["avoided_group_count"] or 0),
         }
 
+    def _quick_feedback_rows(self, user_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT DISTINCT ON (feedback.task_id)
+                           feedback.task_id, feedback.action,
+                           task->>'category' AS category,
+                           task->>'feedback_group' AS feedback_group
+                    FROM quick_recommendation_feedback AS feedback
+                    JOIN quick_recommendation_runs AS run ON run.id = feedback.run_id
+                    JOIN LATERAL jsonb_array_elements(run.tasks_json) AS task
+                      ON task->>'id' = feedback.task_id
+                    WHERE run.user_id = %s
+                      AND feedback.action IN ('liked', 'disliked')
+                    ORDER BY feedback.task_id, feedback.created_at DESC,
+                             feedback.id DESC
+                    """,
+                    (user_id,),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+
     def preference_weights(self, user_id: str | None) -> dict[str, Any]:
         empty = {
             "category_boosts": {},
@@ -274,9 +298,10 @@ class UserHistoryService:
                     (user_id,),
                 )
                 rows = cursor.fetchall()
-        category_counts: dict[str, int] = {}
-        group_counts: dict[str, int] = {}
+        category_counts: dict[str, float] = {}
+        group_counts: dict[str, float] = {}
         negative_counts: dict[str, int] = {}
+        quick_negative_counts: dict[str, int] = {}
         completed_durations: list[int] = []
         for row in rows:
             if row["action"] == "completed":
@@ -286,6 +311,17 @@ class UserHistoryService:
             elif row["action"] in {"skipped", "replaced_from"}:
                 group = row["feedback_group"]
                 negative_counts[group] = negative_counts.get(group, 0) + 1
+        for row in self._quick_feedback_rows(user_id):
+            group = row["feedback_group"]
+            category = row["category"]
+            if row["action"] == "liked":
+                category_counts[category] = category_counts.get(category, 0) + 0.5
+                group_counts[group] = group_counts.get(group, 0) + 0.5
+            elif row["action"] == "disliked":
+                quick_negative_counts[group] = quick_negative_counts.get(group, 0) + 1
+        for group, count in quick_negative_counts.items():
+            if count >= 2 or group in negative_counts:
+                negative_counts[group] = negative_counts.get(group, 0) + count
         return {
             "category_boosts": {
                 category: min(0.3, count * 0.05) for category, count in category_counts.items()
@@ -310,12 +346,24 @@ class UserHistoryService:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT feedback_group
+                    SELECT feedback_group, COUNT(*)
                     FROM user_task_history
                     WHERE user_id = %s AND action IN ('skipped', 'replaced_from')
                     GROUP BY feedback_group
-                    HAVING COUNT(*) >= 2
                     """,
                     (user_id,),
                 )
-                return {row[0] for row in cursor.fetchall()}
+                counts = {group: count for group, count in cursor.fetchall()}
+        for row in self._quick_feedback_rows(user_id):
+            if row["action"] == "disliked":
+                group = row["feedback_group"]
+                counts[group] = counts.get(group, 0) + 1
+        return {group for group, count in counts.items() if count >= 2}
+
+    def excluded_task_ids(self, user_id: str | None) -> set[str]:
+        if not user_id:
+            return set()
+        return {
+            row["task_id"] for row in self._quick_feedback_rows(user_id)
+            if row["action"] == "disliked"
+        }

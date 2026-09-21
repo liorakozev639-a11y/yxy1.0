@@ -79,6 +79,43 @@ class CandidateProviderTest(unittest.TestCase):
         )
         self.assertEqual(result["task_ids"], ["from_provider"])
 
+    def test_full_orchestrator_excludes_a_quick_disliked_task(self) -> None:
+        first = Task("disliked", "已否定", "活力充电", 10, 0, "home", "solo")
+        second = Task("other", "其他建议", "活力充电", 10, 0, "home", "solo")
+
+        class TwoCandidates:
+            def generate(self, context):
+                return [CandidateTask(first, "", "task_bank"),
+                        CandidateTask(second, "", "task_bank")]
+
+        class QuickHistory:
+            def preference_weights(self, user_id):
+                return {}
+
+            def excluded_groups(self, user_id):
+                return set()
+
+            def excluded_task_ids(self, user_id):
+                return {"disliked"}
+
+        orchestrator = MVPOrchestrator(
+            sessions=None, questionnaire=None, tasks=TaskRepository(),
+            profiles=None, plans=None, delivery=None,
+            user_history=QuickHistory(), candidate_provider=TwoCandidates(),
+        )
+        result = orchestrator._recommend(
+            {
+                "session_id": "sess_test",
+                "scores": {"活力充电": 1},
+                "constraints": {
+                    "budget_limit": 0, "max_duration": 30,
+                    "outing": "home", "company": "solo",
+                },
+            },
+            ["活力充电"], user_id="user_test",
+        )
+        self.assertEqual(result["task_ids"], ["other"])
+
 
 if __name__ == "__main__":
     unittest.main()

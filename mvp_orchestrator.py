@@ -613,6 +613,12 @@ class MVPOrchestrator:
             if callable(list_excluded_task_ids)
             else set()
         )
+        if self.user_history is not None:
+            history_excluded_task_ids = getattr(
+                self.user_history, "excluded_task_ids", None
+            )
+            if callable(history_excluded_task_ids):
+                excluded_task_ids.update(history_excluded_task_ids(user_id))
         history_weights = (
             self.user_history.preference_weights(user_id)
             if self.user_history is not None
