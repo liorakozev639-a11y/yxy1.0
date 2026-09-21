@@ -33,13 +33,16 @@ class RecommendationMemory:
         database_url: str,
         sessions: SessionService,
         tasks: TaskRepository,
+        *,
+        schema_init: bool = True,
     ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.sessions = sessions
         self.tasks = tasks
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def _connect(self) -> psycopg.Connection:
         return psycopg.connect(self.database_url)

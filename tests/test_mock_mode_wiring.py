@@ -14,7 +14,10 @@ class MockModeWiringTests(unittest.TestCase):
                 "main.PostgresGeneratedTaskRepository", return_value=object()
             ) as generated_repo:
                 orchestrator = build_orchestrator(object(), object())
-        generated_repo.assert_called_once_with("postgresql://unused")
+            generated_repo.assert_called_once_with(
+                "postgresql://unused",
+                schema_init=False,
+            )
         self.assertIsNotNone(orchestrator.mock_generation)
 
     def test_default_mode_does_not_create_mock_generator(self):

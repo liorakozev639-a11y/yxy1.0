@@ -22,13 +22,16 @@ class FeedbackService:
         database_url: str,
         sessions: Any,
         memory: Any | None = None,
+        *,
+        schema_init: bool = True,
     ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.sessions = sessions
         self.memory = memory
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def _connect(self):
         return psycopg.connect(self.database_url, row_factory=dict_row)

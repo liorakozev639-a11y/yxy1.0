@@ -23,13 +23,21 @@ def make_id(prefix: str) -> str:
 class ReviewService:
     """Refresh task deadlines, store optional reflections, and build reviews."""
 
-    def __init__(self, database_url: str, sessions: Any, execution: Any) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        sessions: Any,
+        execution: Any,
+        *,
+        schema_init: bool = True,
+    ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.sessions = sessions
         self.execution = execution
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def _connect(self):
         return psycopg.connect(self.database_url, row_factory=dict_row)

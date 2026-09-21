@@ -38,6 +38,7 @@ from mock_task_service import MockTaskGenerationService
 from user_history_service import UserHistoryService
 from candidate_provider import TaskBankProvider
 from quick_recommendation_service import QuickRecommendationService
+from database_migrations import run_migrations
 
 ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
@@ -190,10 +191,13 @@ def build_services() -> tuple[SessionService, QuestionnaireService]:
     database_url = os.getenv("SESSION_DATABASE_URL")
     if not database_url:
         raise RuntimeError("启动服务前必须设置 SESSION_DATABASE_URL")
-    session_service = SessionService(PostgresSessionRepository(database_url))
+    run_migrations(database_url)
+    session_service = SessionService(
+        PostgresSessionRepository(database_url, schema_init=False)
+    )
     questionnaire_service = QuestionnaireService(
         session_service,
-        PostgresQuestionnaireRepository(database_url),
+        PostgresQuestionnaireRepository(database_url, schema_init=False),
     )
     return session_service, questionnaire_service
 
@@ -213,7 +217,9 @@ def build_orchestrator(
     if generation_mode == "mock" and os.getenv("VERCEL"):
         raise RuntimeError("模拟生成模式只能在本地测试环境使用")
     mock_generation = (
-        MockTaskGenerationService(PostgresGeneratedTaskRepository(database_url))
+        MockTaskGenerationService(
+            PostgresGeneratedTaskRepository(database_url, schema_init=False)
+        )
         if generation_mode == "mock"
         else None
     )
@@ -221,10 +227,10 @@ def build_orchestrator(
         sessions=session_service,
         questionnaire=questionnaire_service,
         tasks=TaskRepository() if generation_mode == "rules" else None,
-        profiles=PostgreSQLProfileRepository(database_url),
-        plans=PostgreSQLPlanRepository(database_url),
+        profiles=PostgreSQLProfileRepository(database_url, schema_init=False),
+        plans=PostgreSQLPlanRepository(database_url, schema_init=False),
         delivery=WebDeliveryService(
-            PostgreSQLDeliveryRepository(database_url),
+            PostgreSQLDeliveryRepository(database_url, schema_init=False),
         ),
         memory=memory,
         user_history=user_history,
@@ -256,6 +262,8 @@ def create_app(
     if session_service is None or questionnaire_service is None:
         session_service, questionnaire_service = build_services()
     database_url = os.getenv("SESSION_DATABASE_URL")
+    if database_url and isinstance(session_service, SessionService):
+        run_migrations(database_url)
     if (
         memory is None
         and database_url
@@ -265,9 +273,14 @@ def create_app(
             database_url,
             session_service,
             TaskRepository(),
+            schema_init=False,
         )
     if user_history is None and database_url:
-        user_history = UserHistoryService(database_url, TaskRepository())
+        user_history = UserHistoryService(
+            database_url,
+            TaskRepository(),
+            schema_init=False,
+        )
     if history_insight is None and database_url:
         history_insight = HistoryInsightService(database_url)
     if (
@@ -299,6 +312,7 @@ def create_app(
             orchestrator,
             memory=memory,
             user_history=user_history,
+            schema_init=False,
         )
     if (
         execution_service is None
@@ -310,6 +324,7 @@ def create_app(
             session_service,
             memory=memory,
             user_history=user_history,
+            schema_init=False,
         )
     if (
         feedback_service is None
@@ -320,6 +335,7 @@ def create_app(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
             memory=memory,
+            schema_init=False,
         )
     if (
         review_service is None
@@ -331,6 +347,7 @@ def create_app(
             os.environ["SESSION_DATABASE_URL"],
             session_service,
             execution_service,
+            schema_init=False,
         )
 
     app = FastAPI(

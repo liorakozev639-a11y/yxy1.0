@@ -114,11 +114,12 @@ class PlanRepository(Protocol):
 class PostgreSQLProfileRepository:
     """Persist deterministic profile snapshots in PostgreSQL."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, schema_init: bool = True) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def _connect(self):
         import psycopg
@@ -209,11 +210,12 @@ class PostgreSQLProfileRepository:
 class PostgreSQLPlanRepository:
     """Persist plan headers and timeline items in PostgreSQL."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, schema_init: bool = True) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def _connect(self):
         import psycopg

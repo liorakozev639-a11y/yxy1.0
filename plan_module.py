@@ -251,6 +251,8 @@ class PlanManagementService:
         orchestrator: Any,
         memory: Any | None = None,
         user_history: Any | None = None,
+        *,
+        schema_init: bool = True,
     ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
@@ -260,7 +262,8 @@ class PlanManagementService:
         self.memory = memory
         self.user_history = user_history
         self.tasks = TaskRepository() if getattr(orchestrator, "mock_generation", None) is None else None
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     @property
     def _mock_generation(self):
@@ -474,10 +477,19 @@ class PlanManagementService:
             copied["id"] = make_id("item")
             new_items.append(copied)
         with self._connect() as connection:
-            connection.execute(
-                "UPDATE plans SET status = 'superseded' WHERE id = %s",
-                (plan["plan_id"],),
+            updated = connection.execute(
+                """
+                UPDATE plans
+                SET status = 'superseded'
+                WHERE id = %s AND version = %s AND status <> 'superseded'
+                """,
+                (plan["plan_id"], plan["version"]),
             )
+            if updated.rowcount != 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="计划版本已变化，请刷新后重试",
+                )
             connection.execute(
                 """
                 INSERT INTO plans

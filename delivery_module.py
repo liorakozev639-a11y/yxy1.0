@@ -180,14 +180,15 @@ class WebDeliveryService:
 class PostgreSQLDeliveryRepository:
     """PostgreSQL persistence adapter; no in-memory production store is used."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, schema_init: bool = True) -> None:
         if not database_url:
             raise DeliveryError("database_url 不能为空")
         if psycopg is None:
             raise DeliveryError("运行 PostgreSQL 适配器需要安装 psycopg")
         self.database_url = database_url
-        with psycopg.connect(self.database_url) as connection:
-            connection.execute(DELIVERY_SCHEMA_SQL)
+        if schema_init:
+            with psycopg.connect(self.database_url) as connection:
+                connection.execute(DELIVERY_SCHEMA_SQL)
 
     def save_or_get_web(
         self,

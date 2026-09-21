@@ -31,6 +31,8 @@ class ExecutionService:
         sessions: Any,
         memory: Any | None = None,
         user_history: Any | None = None,
+        *,
+        schema_init: bool = True,
     ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
@@ -38,7 +40,8 @@ class ExecutionService:
         self.sessions = sessions
         self.memory = memory
         self.user_history = user_history
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def _connect(self):
         return psycopg.connect(self.database_url)

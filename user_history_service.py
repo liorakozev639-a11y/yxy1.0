@@ -24,13 +24,20 @@ def make_id(prefix: str) -> str:
 
 
 class UserHistoryService:
-    def __init__(self, database_url: str, tasks: TaskRepository | None = None) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        tasks: TaskRepository | None = None,
+        *,
+        schema_init: bool = True,
+    ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self.tasks = tasks or TaskRepository()
-        self.init_schema()
-        self.quick_store = QuickRecommendationStore(database_url)
+        if schema_init:
+            self.init_schema()
+        self.quick_store = QuickRecommendationStore(database_url, schema_init=schema_init)
 
     def _connect(self):
         return psycopg.connect(self.database_url)

@@ -16,9 +16,10 @@ def _make_id(prefix: str) -> str:
 
 
 class QuickRecommendationStore:
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, *, schema_init: bool = True) -> None:
         self.database_url = database_url
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def _connect(self):
         return psycopg.connect(self.database_url)

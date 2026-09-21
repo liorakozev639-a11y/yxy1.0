@@ -15,12 +15,14 @@ class PostgresGeneratedTaskRepository:
         database_url: str,
         *,
         connect: Callable[[str], Any] | None = None,
+        schema_init: bool = True,
     ) -> None:
         if not database_url:
             raise ValueError("database_url 不能为空")
         self.database_url = database_url
         self._connect = connect or psycopg.connect
-        self.init_schema()
+        if schema_init:
+            self.init_schema()
 
     def init_schema(self) -> None:
         with self._connect(self.database_url) as connection:
