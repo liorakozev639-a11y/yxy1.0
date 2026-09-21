@@ -27,11 +27,11 @@ test('service worker caches the app shell without caching API calls', () => {
 
   assert.match(worker, /const APP_SHELL/);
   assert.match(worker, /index\.html/);
-  assert.match(worker, /free-time-agent-pwa-v5/);
-  assert.match(worker, /styles\.css\?v=pixel-v11/);
-  assert.match(worker, /api\.js\?v=pixel-v11/);
-  assert.match(worker, /flow\.js\?v=pixel-v11/);
-  assert.match(worker, /app\.js\?v=pixel-v11/);
+  assert.match(worker, /free-time-agent-pwa-v6/);
+  assert.match(worker, /styles\.css\?v=pixel-v12/);
+  assert.match(worker, /api\.js\?v=pixel-v12/);
+  assert.match(worker, /flow\.js\?v=pixel-v12/);
+  assert.match(worker, /app\.js\?v=pixel-v12/);
   assert.match(worker, /icons\/icon-192\.png/);
   assert.match(worker, /icons\/icon-512\.png/);
   assert.match(worker, /request\.url\.includes\('\/api\/v1\/'\)/);

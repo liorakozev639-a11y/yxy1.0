@@ -689,20 +689,20 @@
 
   function executionActions(item, plan) {
     if (item.recommendationOnly) {
-      return `<button class="button primary compact" data-action="add-recommended-task" data-item-id="${escapeHtml(item.task_id)}" ${state.busy ? 'disabled' : ''}>加入时间线</button><span class="execution-status recommendation-status">待安排到当前时间线</span>`;
+      return `<div class="task-primary-action"><button class="button primary compact" data-action="add-recommended-task" data-item-id="${escapeHtml(item.task_id)}" ${state.busy ? 'disabled' : ''}>加入时间线</button></div><span class="execution-status recommendation-status">还没有加入时间线</span>`;
     }
     const disabled = state.busy ? 'disabled' : '';
     if (item.status === 'pending') {
-      return `<button class="button primary compact" data-action="start-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>开始任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>${energyPanel(item)}`;
+      return `<div class="task-primary-action"><button class="button primary compact" data-action="start-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>开始任务</button></div><div class="task-secondary-actions"><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button></div>${energyPanel(item)}`;
     }
     if (item.status === 'active') {
-      return `<button class="button primary compact" data-action="complete-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>完成任务</button><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button>`;
+      return `<div class="task-primary-action"><button class="button primary compact" data-action="complete-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>完成任务</button></div><div class="task-secondary-actions"><button class="button ghost compact" data-action="skip-execution" data-item-id="${escapeHtml(item.id)}" ${disabled}>跳过</button><button class="button ghost compact" data-action="check-deadline" data-item-id="${escapeHtml(item.id)}" ${disabled}>检查截止</button></div>`;
     }
     if (item.status === 'completed') {
-      return `<button class="button secondary compact" data-action="open-feedback" data-item-id="${escapeHtml(item.id)}" ${disabled}>${state.feedbackItemId === item.id ? '收起反馈' : '任务反馈'}</button>`;
+      return `<div class="task-secondary-actions"><button class="button secondary compact" data-action="open-feedback" data-item-id="${escapeHtml(item.id)}" ${disabled}>${state.feedbackItemId === item.id ? '收起反馈' : '任务反馈'}</button></div>`;
     }
     if (item.status === 'needs_adjustment' || item.status === 'missed' || item.status === 'overdue') {
-      return `<button class="button secondary compact" data-action="replan" ${disabled}>重新排程</button>`;
+      return `<div class="task-primary-action"><button class="button secondary compact" data-action="replan" ${disabled}>重新排程</button></div>`;
     }
     return `<span class="execution-status">${executionStatusLabel(item.status)}</span>`;
   }
@@ -762,13 +762,12 @@
     const skipButton = isScheduled && (status === 'pending' || status === 'active')
       ? `<button class="button ghost compact" data-action="skip-plan-item" data-item-id="${escapeHtml(item.id)}">编辑跳过</button>`
       : '';
+    const secondaryActions = [replaceButton, detailButton, editButton, skipButton].filter(Boolean).join('');
     return `<article class="timeline-item pixel-timeline-item recommended-task-card status-${escapeHtml(status)} ${item.recommendationOnly ? 'is-recommendation-only' : ''} ${status === 'skipped' ? 'is-skipped' : ''}">
-      <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${time}</div>
-      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span class="pixel-task-meta-line">${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${recommendationExplain(item)}${item.first_action ? `<p class="mock-first-action"><strong>第一步</strong> ${escapeHtml(item.first_action)}</p>` : ''}${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
+      <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">建议时间</span>${time}</div>
+      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span class="pixel-task-meta-line">${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div></div>${recommendationExplain(item)}${item.first_action ? `<p class="mock-first-action"><strong>第一步</strong> ${escapeHtml(item.first_action)}</p>` : ''}${reasonTags(item)}<details class="task-details"><summary>查看任务细节</summary>${taskLoadSummary(item)}${adjustmentButtons(item)}</details><div class="timeline-actions">
         ${executionActions(item, plan)}
-        ${detailButton}
-        ${editButton}
-        ${skipButton}
+        ${secondaryActions ? `<div class="task-secondary-actions task-card-secondary-actions">${secondaryActions}</div>` : ''}
       </div>${feedbackPanel(item)}</div>
     </article>`;
   }

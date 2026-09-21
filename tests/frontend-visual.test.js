@@ -15,10 +15,10 @@ test('formal frontend exposes the pixel visual shell', () => {
   assert.match(index, /今日留白/);
   assert.match(index, /class="site-header pixel-header"/);
   assert.match(index, /class="app-shell pixel-app-shell"/);
-  assert.match(index, /styles\.css\?v=pixel-v11/);
-  assert.match(index, /api\.js\?v=pixel-v11/);
-  assert.match(index, /flow\.js\?v=pixel-v11/);
-  assert.match(index, /app\.js\?v=pixel-v11/);
+  assert.match(index, /styles\.css\?v=pixel-v12/);
+  assert.match(index, /api\.js\?v=pixel-v12/);
+  assert.match(index, /flow\.js\?v=pixel-v12/);
+  assert.match(index, /app\.js\?v=pixel-v12/);
   assert.match(app, /class="screen pixel-screen/);
   assert.match(app, /pixel-plan-layout/);
   assert.match(app, /pixel-plan-hero/);
@@ -158,4 +158,16 @@ test('result view exposes a copyable plan share summary', () => {
   assert.match(app, /复制计划/);
   assert.match(app, /分享执行清单/);
   assert.match(css, /\.share-summary-panel/);
+});
+
+test('task cards separate the primary action from secondary adjustments', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /建议时间/);
+  assert.match(app, /还没有加入时间线/);
+  assert.match(app, /task-primary-action/);
+  assert.match(app, /task-secondary-actions/);
+  assert.match(css, /\.task-primary-action/);
+  assert.match(css, /\.task-secondary-actions/);
 });
