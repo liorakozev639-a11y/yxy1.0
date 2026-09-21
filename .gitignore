@@ -9,3 +9,4 @@ __pycache__/
 .env.local
 *.log
 .test-postgres-data/
+.sdd-postgres-task1/
