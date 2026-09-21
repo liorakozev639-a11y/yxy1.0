@@ -3,6 +3,8 @@ const test = require('node:test');
 
 const { selectQuickTask, afterQuickDislike } = require('../frontend/flow.js');
 const { STORAGE_KEY, QUICK_STORAGE_KEY, createApi } = require('../frontend/api.js');
+const fs = require('node:fs');
+const path = require('node:path');
 
 function storage() {
   const items = new Map([[STORAGE_KEY, 'full_1']]);
@@ -50,4 +52,11 @@ test('quick session and API calls do not overwrite full session', async () => {
   assert.equal(local.getItem(QUICK_STORAGE_KEY), 'quick_1');
   assert.deepEqual(calls.map((call) => call.options.method), ['POST', 'POST', 'GET', 'POST']);
   assert.ok(calls.slice(1).every((call) => call.url.includes('/sessions/quick_1/quick-recommendations')));
+});
+
+test('quick alternatives and history name the constraints and feedback distinctly', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+  assert.match(app, /quick-alternative[\s\S]*居家[\s\S]*无需花费/);
+  assert.match(app, /极简反馈/);
+  assert.match(app, /喜欢[\s\S]*不喜欢/);
 });

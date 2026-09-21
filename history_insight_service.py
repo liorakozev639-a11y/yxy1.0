@@ -25,8 +25,9 @@ class HistoryInsightService:
             recent_plans = self._recent_plans(connection, user_id)
             favorite_categories = self._favorite_categories(connection, user_id)
             avoided_groups = self._avoided_groups(connection, user_id)
+            quick_feedback = self._quick_feedback(connection, user_id)
 
-        has_history = any(
+        has_history = bool(quick_feedback["liked_count"] or quick_feedback["disliked_count"]) or any(
             summary[key] > 0
             for key in ("completed_count", "skipped_count", "replaced_count", "low_rating_count")
         )
@@ -39,8 +40,39 @@ class HistoryInsightService:
             "recent_plans": recent_plans,
             "favorite_categories": favorite_categories,
             "avoided_groups": avoided_groups,
-            "learning_notes": self._learning_notes(summary, favorite_categories, avoided_groups),
+            "quick_feedback": quick_feedback,
+            "learning_notes": self._learning_notes(summary, favorite_categories, avoided_groups, quick_feedback),
             "next_recommendation_strategy": self._next_strategy(summary, favorite_categories, avoided_groups),
+        }
+
+    @staticmethod
+    def _quick_feedback(connection, user_id: str) -> dict[str, Any]:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("SELECT to_regclass('public.quick_recommendation_feedback') AS relation")
+            if cursor.fetchone()["relation"] is None:
+                return {"liked_count": 0, "disliked_count": 0, "recent": []}
+            cursor.execute(
+                """
+                SELECT f.action, f.created_at,
+                       COALESCE(task->>'title', f.task_id) AS title
+                FROM quick_recommendation_feedback AS f
+                JOIN quick_recommendation_runs AS r ON r.id = f.run_id
+                LEFT JOIN LATERAL jsonb_array_elements(r.tasks_json) AS task
+                    ON task->>'id' = f.task_id
+                WHERE r.user_id = %s AND f.action IN ('liked', 'disliked')
+                ORDER BY f.created_at DESC, f.id DESC
+                """,
+                (user_id,),
+            )
+            rows = cursor.fetchall()
+        return {
+            "liked_count": sum(row["action"] == "liked" for row in rows),
+            "disliked_count": sum(row["action"] == "disliked" for row in rows),
+            "recent": [
+                {"action": row["action"], "title": row["title"],
+                 "created_at": row["created_at"].isoformat()}
+                for row in rows[:5]
+            ],
         }
 
     @staticmethod
@@ -217,6 +249,7 @@ class HistoryInsightService:
         summary: dict[str, int],
         favorite_categories: list[dict[str, Any]],
         avoided_groups: list[dict[str, Any]],
+        quick_feedback: dict[str, Any],
     ) -> list[str]:
         notes: list[str] = []
         if favorite_categories:
@@ -229,6 +262,8 @@ class HistoryInsightService:
             )
         if summary["low_rating_count"]:
             notes.append("你给过 1-2 分的任务会被视为低满意度信号，后续推荐会更谨慎。")
+        if quick_feedback["liked_count"] or quick_feedback["disliked_count"]:
+            notes.append("极简模式中的喜欢和不喜欢会影响后续推荐，但不会记为已完成任务。")
         if not notes:
             notes.append("完成、跳过或反馈任务后，系统会逐步形成你的偏好学习记录。")
         return notes

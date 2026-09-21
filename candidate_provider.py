@@ -52,6 +52,20 @@ def is_quick_eligible(context: RecommendationContext, item: CandidateTask) -> bo
     )
 
 
+def is_full_eligible(context: RecommendationContext, item: CandidateTask) -> bool:
+    task = item.task
+    return (
+        context.mode == "full"
+        and task.status == "approved"
+        and 0 < task.duration <= context.available_minutes
+        and 0 <= task.budget <= context.budget_limit
+        and TaskRepository._matches_outing(task, context.outing)
+        and TaskRepository._matches_company(task, context.company)
+        and (not context.categories or task.category in context.categories)
+        and (not context.scenarios or bool(set(task.scenarios).intersection(context.scenarios)))
+    )
+
+
 class TaskBankProvider:
     def __init__(self, repository: TaskRepository) -> None:
         self.repository = repository
@@ -94,7 +108,7 @@ class FallbackCandidateProvider:
         if context.mode == "quick":
             primary = [item for item in primary if is_quick_eligible(context, item)]
         else:
-            primary = [item for item in primary if item.task.status == "approved"]
+            primary = [item for item in primary if is_full_eligible(context, item)]
         if primary:
             return primary
         logging.getLogger(__name__).info("Candidate source returned no usable tasks; using task bank")

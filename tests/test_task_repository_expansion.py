@@ -5,11 +5,13 @@ from task_repository import CATEGORIES, PUBLIC_TASKS, SCENARIOS, Task, TaskRepos
 
 
 class TaskRepositoryExpansionTests(unittest.TestCase):
-    def test_public_task_bank_has_sixty_tasks_per_category_and_feedback_groups(self) -> None:
+    def test_public_task_bank_has_one_hundred_forty_tasks_per_category_and_feedback_groups(self) -> None:
         counts = Counter(task.category for task in PUBLIC_TASKS)
 
-        self.assertEqual(len(PUBLIC_TASKS), 300)
-        self.assertEqual(counts, {category: 60 for category in CATEGORIES})
+        self.assertEqual(len(PUBLIC_TASKS), 700)
+        self.assertEqual(counts, {category: 140 for category in CATEGORIES})
+        self.assertEqual(len({task.id for task in PUBLIC_TASKS}), len(PUBLIC_TASKS))
+        self.assertEqual(len({task.title for task in PUBLIC_TASKS}), len(PUBLIC_TASKS))
         self.assertTrue(all(task.feedback_group for task in PUBLIC_TASKS))
         self.assertTrue(
             all(

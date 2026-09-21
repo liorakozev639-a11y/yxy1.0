@@ -79,6 +79,31 @@ class CandidateProviderTest(unittest.TestCase):
         )
         self.assertEqual(result["task_ids"], ["from_provider"])
 
+    def test_full_orchestrator_rejects_out_of_bounds_provider_candidates(self) -> None:
+        valid = Task("valid", "居家舒展", "活力充电", 10, 0, "home", "solo")
+        invalid = [
+            Task("too_long", "太久", "活力充电", 90, 0, "home", "solo"),
+            Task("too_costly", "超预算", "活力充电", 10, 50, "home", "solo"),
+            Task("wrong_place", "远行", "活力充电", 10, 0, "city", "solo"),
+            Task("wrong_company", "组队", "活力充电", 10, 0, "home", "group"),
+        ]
+
+        class UnsafeProvider:
+            def generate(self, context):
+                return [CandidateTask(task, "", "external") for task in [*invalid, valid]]
+
+        orchestrator = MVPOrchestrator(
+            sessions=None, questionnaire=None, tasks=TaskRepository(),
+            profiles=None, plans=None, delivery=None, candidate_provider=UnsafeProvider(),
+        )
+        result = orchestrator._recommend(
+            {"session_id": "sess_test", "scores": {"活力充电": 1},
+             "constraints": {"budget_limit": 0, "max_duration": 30,
+                             "outing": "home", "company": "solo"}},
+            ["活力充电"],
+        )
+        self.assertEqual(result["task_ids"], ["valid"])
+
     def test_full_orchestrator_excludes_a_quick_disliked_task(self) -> None:
         first = Task("disliked", "已否定", "活力充电", 10, 0, "home", "solo")
         second = Task("other", "其他建议", "活力充电", 10, 0, "home", "solo")

@@ -10,7 +10,7 @@ from typing import Any, Optional, Protocol
 
 from fastapi import HTTPException
 
-from candidate_provider import CandidateProvider, RecommendationContext, TaskBankProvider
+from candidate_provider import CandidateProvider, RecommendationContext, TaskBankProvider, is_full_eligible
 from delivery_module import Plan as DeliveryPlan
 from delivery_module import PlanItem as DeliveryPlanItem
 from delivery_module import WebDeliveryService
@@ -597,6 +597,7 @@ class MVPOrchestrator:
         )
         candidates = [
             candidate.task for candidate in self.candidate_provider.generate(context)
+            if is_full_eligible(context, candidate)
         ]
         excluded_groups = (
             self.memory.list_excluded_groups(profile["session_id"])

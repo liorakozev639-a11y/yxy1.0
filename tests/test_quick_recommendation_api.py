@@ -5,17 +5,31 @@ import unittest
 from fastapi.testclient import TestClient
 
 from main import create_app
+from quick_test_support import delete_test_user, require_test_database
+from session_module import PostgresSessionRepository
 
 
 class QuickRecommendationApiTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        cls.database_url = require_test_database()
         cls.client = TestClient(create_app())
+        cls.sessions = PostgresSessionRepository(cls.database_url)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
 
     def setUp(self) -> None:
         self.session_id = self.client.post("/api/v1/sessions").json()["data"]["session_id"]
+        self.session_ids = [self.session_id]
         self.user_id = self.client.post("/api/v1/users/anonymous", json={}).json()["data"]["user_id"]
         self.path = f"/api/v1/sessions/{self.session_id}/quick-recommendations"
+
+    def tearDown(self) -> None:
+        for session_id in self.session_ids:
+            self.sessions.delete(session_id)
+        delete_test_user(self.database_url, self.user_id)
 
     def generate(self, minutes: int = 15, energy: str = "low"):
         return self.client.post(
@@ -56,6 +70,7 @@ class QuickRecommendationApiTest(unittest.TestCase):
             {404, 409},
         )
         other_session = self.client.post("/api/v1/sessions").json()["data"]["session_id"]
+        self.session_ids.append(other_session)
         self.assertIn(
             self.client.post(
                 f"/api/v1/sessions/{other_session}/quick-recommendations/{data['run_id']}/feedback",

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import os
 import unittest
 
 from fastapi.testclient import TestClient
 
 from main import create_app
+from quick_test_support import delete_test_user, require_test_database
 from quick_recommendation_store import QuickRecommendationStore
+from session_module import PostgresSessionRepository
 from task_repository import TaskRepository
 from user_history_service import UserHistoryService
 
@@ -25,12 +26,17 @@ def task_payload(task_id: str) -> dict:
 
 class QuickStoreTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.database_url = os.environ["SESSION_DATABASE_URL"]
+        self.database_url = require_test_database()
         self.client = TestClient(create_app())
         self.session_id = self.client.post("/api/v1/sessions").json()["data"]["session_id"]
         self.user_id = self.client.post("/api/v1/users/anonymous", json={}).json()["data"]["user_id"]
         self.store = QuickRecommendationStore(self.database_url)
         self.history = UserHistoryService(self.database_url)
+
+    def tearDown(self) -> None:
+        PostgresSessionRepository(self.database_url).delete(self.session_id)
+        delete_test_user(self.database_url, self.user_id)
+        self.client.close()
 
     def save_run(self, task_ids: list[str]) -> str:
         return self.store.save_run(

@@ -10,8 +10,6 @@ QUICK_FIRST_ACTIONS: dict[str, str] = {
     "task_recovery_11": "放松肩膀，尝试缓慢地用腹部呼吸。",
     "task_recovery_18": "坐稳，先觉察双脚与地面的接触。",
     "task_recovery_32": "闭上眼睛，先让视线离开屏幕。",
-    "task_recovery_100": "走到窗边，看看此刻的天空。",
-    "task_recovery_126": "播放一首熟悉的歌，先注意一次呼吸。",
     "task_energy_01": "站稳，先轻轻活动肩膀和颈部。",
     "task_energy_06": "站稳，缓慢转动肩膀一次。",
     "task_energy_11": "起身站稳，先做一次温和伸展。",

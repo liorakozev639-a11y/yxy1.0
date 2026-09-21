@@ -294,7 +294,7 @@
           <div class="quick-actions"><button class="button secondary compact" data-action="quick-like" ${state.busy ? 'disabled' : ''}>${liked ? '已喜欢' : '喜欢'}</button><button class="button ghost compact" data-action="quick-dislike" ${state.busy ? 'disabled' : ''}>不喜欢</button></div>
         </div>` : `<div class="quick-empty"><h2>当前条件下暂无合适建议</h2><p>可以调整时长，或者直接休息。</p></div>`}
         ${!state.quickRestSelected && alternatives.length ? `<div class="quick-more"><button class="button ghost compact" data-action="quick-toggle-more" aria-expanded="${state.quickShowMore}">${state.quickShowMore ? '收起' : `查看更多（${alternatives.length}）`}</button>
-          ${state.quickShowMore ? `<div class="quick-alternatives">${alternatives.map((task) => `<button class="quick-alternative" data-action="quick-select-task" data-task-id="${escapeHtml(task.id)}" ${state.busy ? 'disabled' : ''}><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.duration_minutes)} 分钟 · ${escapeHtml(task.first_action)}</span></button>`).join('')}</div>` : ''}</div>` : ''}
+          ${state.quickShowMore ? `<div class="quick-alternatives">${alternatives.map((task) => `<button class="quick-alternative" data-action="quick-select-task" data-task-id="${escapeHtml(task.id)}" ${state.busy ? 'disabled' : ''}><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.duration_minutes)} 分钟 · 居家 · 无需花费 · 独处可做</span><span>${escapeHtml(task.first_action)}</span></button>`).join('')}</div>` : ''}</div>` : ''}
         ${!state.quickRestSelected ? `<button class="button quick-rest" data-action="quick-rest" ${state.busy ? 'disabled' : ''}>直接休息</button>` : ''}
       </div>` : ''}
     </section>`;
@@ -607,6 +607,11 @@
         <div class="history-stat"><span>累计完成</span><strong>${escapeHtml(summary.completed_count ?? 0)}</strong></div>
         <div class="history-stat"><span>跳过/替换</span><strong>${escapeHtml((summary.skipped_count ?? 0) + (summary.replaced_count ?? 0))}</strong></div>
         <div class="history-stat"><span>低分反馈</span><strong>${escapeHtml(summary.low_rating_count ?? 0)}</strong></div>
+      </div>
+      <div class="history-quick-feedback">
+        <h3>极简反馈</h3>
+        <p>喜欢 ${escapeHtml(insight.quick_feedback?.liked_count ?? 0)} · 不喜欢 ${escapeHtml(insight.quick_feedback?.disliked_count ?? 0)}。这些选择用于调整推荐，不算完成任务。</p>
+        ${historyList(insight.quick_feedback?.recent, '还没有极简模式反馈。', (item) => `<div class="history-row"><strong>${escapeHtml(item.title)}</strong><span>${item.action === 'liked' ? '喜欢' : '不喜欢'}</span></div>`)}
       </div>
       <div class="history-grid">
         <article class="history-card">

@@ -27,8 +27,13 @@ class HistoryInsightServiceTest(unittest.TestCase):
         self.service = HistoryInsightService(database_url)
         self.user = self.history.ensure_user()
         self.session_id = self.sessions.create()["session_id"]
+        self.addCleanup(self._delete_user)
         self.addCleanup(self.sessions.repository.delete, self.session_id)
         self.tasks = TaskRepository().public_tasks
+
+    def _delete_user(self) -> None:
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute("DELETE FROM user_profiles WHERE id = %s", (self.user["user_id"],))
 
     def _insert_plan_item(
         self,
@@ -87,6 +92,22 @@ class HistoryInsightServiceTest(unittest.TestCase):
         self.assertEqual(insight["summary"]["completed_count"], 0)
         self.assertEqual(insight["recent_plans"], [])
         self.assertIn("完成或跳过几个任务后", insight["empty_state"])
+
+    def test_quick_feedback_is_visible_but_not_a_completed_task(self) -> None:
+        task = self.tasks[0]
+        run_id = self.history.quick_store.save_run(
+            self.session_id, self.user["user_id"], 20, "low",
+            [{"id": task.id, "title": task.title, "category": task.category}],
+        )
+        self.history.quick_store.save_feedback(self.session_id, run_id, "liked", task.id)
+
+        insight = self.service.insight(self.user["user_id"])
+
+        self.assertTrue(insight["has_history"])
+        self.assertEqual(insight["summary"]["completed_count"], 0)
+        self.assertEqual(insight["quick_feedback"]["liked_count"], 1)
+        self.assertEqual(insight["quick_feedback"]["disliked_count"], 0)
+        self.assertEqual(insight["quick_feedback"]["recent"][0]["title"], task.title)
 
     def test_history_insight_aggregates_user_learning_signals(self) -> None:
         completed_plan_id, completed_item_id = self._insert_plan_item(
