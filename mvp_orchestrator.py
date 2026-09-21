@@ -10,6 +10,7 @@ from typing import Any, Optional, Protocol
 
 from fastapi import HTTPException
 
+from candidate_provider import CandidateProvider, RecommendationContext, TaskBankProvider
 from delivery_module import Plan as DeliveryPlan
 from delivery_module import PlanItem as DeliveryPlanItem
 from delivery_module import WebDeliveryService
@@ -390,6 +391,7 @@ class MVPOrchestrator:
         memory=None,
         user_history=None,
         mock_generation=None,
+        candidate_provider: CandidateProvider | None = None,
     ):
         self.sessions = sessions
         self.questionnaire = questionnaire
@@ -400,6 +402,11 @@ class MVPOrchestrator:
         self.memory = memory
         self.user_history = user_history
         self.mock_generation = mock_generation
+        self.candidate_provider = (
+            candidate_provider
+            if candidate_provider is not None
+            else TaskBankProvider(tasks) if tasks is not None else None
+        )
 
     def generate_plan(
         self,
@@ -574,15 +581,23 @@ class MVPOrchestrator:
         user_id: str | None = None,
     ) -> dict[str, Any]:
         constraints = profile["constraints"]
-        candidates = self.tasks.search_tasks(
+        if self.candidate_provider is None:
+            raise RuntimeError("任务候选来源未配置")
+        context = RecommendationContext(
+            mode="full",
             session_id=profile["session_id"],
+            user_id=user_id,
+            available_minutes=constraints["max_duration"],
+            energy_level=constraints.get("energy_level", "medium"),
+            categories=tuple(categories),
             budget_limit=constraints["budget_limit"],
-            max_duration=constraints["max_duration"],
             outing=constraints["outing"],
             company=constraints["company"],
-            categories=categories,
-            scenarios=constraints.get("scenarios"),
+            scenarios=tuple(constraints.get("scenarios") or ()),
         )
+        candidates = [
+            candidate.task for candidate in self.candidate_provider.generate(context)
+        ]
         excluded_groups = (
             self.memory.list_excluded_groups(profile["session_id"])
             if self.memory is not None
