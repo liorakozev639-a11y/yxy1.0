@@ -55,7 +55,9 @@
       text: item && item.reason_text
         ? item.reason_text
         : `该任务覆盖「${category}」，并已进入当前计划。`,
-      matchScore: Number.isFinite(Number(item && item.match_score))
+      matchScore: item && item.generation_mode === 'mock'
+        ? null
+        : item && item.match_score != null && Number.isFinite(Number(item.match_score))
         ? Number(item.match_score)
         : null,
       matchedPreferences: Array.isArray(item && item.matched_preferences)
@@ -64,6 +66,12 @@
       loadProfile,
       warningText: item && item.warning_text ? item.warning_text : '',
       replacementReason: item && item.replacement_reason ? item.replacement_reason : '',
+      generationMode: item && item.generation_mode ? item.generation_mode : null,
+      generationReason: item && item.generation_reason ? item.generation_reason : '',
+      recommendationReason: item && item.recommendation_reason ? item.recommendation_reason : '',
+      firstAction: item && item.first_action ? item.first_action : '',
+      prerequisites: Array.isArray(item && item.prerequisites) ? item.prerequisites : [],
+      evidenceRefs: Array.isArray(item && item.evidence_refs) ? item.evidence_refs : [],
     };
   }
 
@@ -185,32 +193,39 @@
 
   function mergeRecommendedItems(items, recommendedTasks) {
     const planItems = Array.isArray(items) ? items : [];
+    const recommendations = Array.isArray(recommendedTasks) ? recommendedTasks : [];
+    const recommendedTaskIds = new Set(recommendations.map((task) => task.id));
     const scheduledByTaskId = new Map(
       planItems
         .filter((item) => item.kind === 'task' && item.task_id)
         .map((item) => [item.task_id, item]),
     );
     const replacementByPreviousTaskId = new Map();
+    const anchoredItemIds = new Set();
     planItems
       .filter((item) => item.kind === 'task' && item.task_id)
       .forEach((item) => {
         const history = Array.isArray(item.replacement_history)
           ? item.replacement_history
           : [];
-        history.forEach((taskId) => {
-          if (taskId !== item.task_id) {
-            replacementByPreviousTaskId.set(taskId, item);
-          }
-        });
+        const originalTaskId = history.find((taskId) => (
+          taskId !== item.task_id && recommendedTaskIds.has(taskId)
+        ));
+        if (originalTaskId) {
+          replacementByPreviousTaskId.set(originalTaskId, item);
+          anchoredItemIds.add(item.id);
+        }
       });
 
-    return (Array.isArray(recommendedTasks) ? recommendedTasks : []).flatMap((task, index) => {
+    return recommendations.flatMap((task, index) => {
       const scheduled = scheduledByTaskId.get(task.id);
-      const replacement = scheduled || replacementByPreviousTaskId.get(task.id);
-      if (replacement) {
+      const replacement = replacementByPreviousTaskId.get(task.id);
+      if (scheduled && anchoredItemIds.has(scheduled.id) && !replacement) return [];
+      const displayedItem = replacement || scheduled;
+      if (displayedItem) {
         return [{
           ...task,
-          ...replacement,
+          ...displayedItem,
           recommendationIndex: index,
           recommendationOnly: false,
         }];
@@ -229,7 +244,25 @@
     });
   }
 
+  function selectQuickTask(run, taskId) {
+    const tasks = [run.primary_task, ...(run.alternatives || [])].filter(Boolean);
+    const selected = tasks.find((task) => task.id === taskId);
+    if (!selected) return run;
+    return {
+      ...run,
+      primary_task: selected,
+      alternatives: tasks.filter((task) => task.id !== taskId),
+    };
+  }
+
+  function afterQuickDislike(run, taskId) {
+    const tasks = [run.primary_task, ...(run.alternatives || [])]
+      .filter((task) => task && task.id !== taskId);
+    return { ...run, primary_task: tasks[0] || null, alternatives: tasks.slice(1) };
+  }
+
   return {
+    afterQuickDislike,
     buildPlanShareText,
     feedbackReasonOptions,
     firstUnansweredIndex,
@@ -239,6 +272,7 @@
     planFailureRecoveryOptions,
     recoverInitialization,
     resumeDestination,
+    selectQuickTask,
     taskReasonSummary,
   };
 }));

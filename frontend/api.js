@@ -12,6 +12,7 @@
 }(typeof window !== 'undefined' ? window : null, function () {
   const STORAGE_KEY = 'free_time_agent_session_id';
   const USER_STORAGE_KEY = 'free_time_agent_user_id';
+  const QUICK_STORAGE_KEY = 'free_time_agent_quick_session_id';
 
   function isLocalHostname(hostname) {
     return hostname === 'localhost'
@@ -95,6 +96,10 @@
       return storage.getItem(STORAGE_KEY);
     }
 
+    function getQuickSessionId() {
+      return storage.getItem(QUICK_STORAGE_KEY);
+    }
+
     function currentUserId() {
       return storage.getItem(USER_STORAGE_KEY);
     }
@@ -119,6 +124,41 @@
       const data = await request('/api/v1/sessions', { method: 'POST' });
       storage.setItem(STORAGE_KEY, data.session_id);
       return data;
+    }
+
+    async function createQuickSession() {
+      const data = await request('/api/v1/sessions', { method: 'POST' });
+      storage.setItem(QUICK_STORAGE_KEY, data.session_id);
+      return data;
+    }
+
+    function requireQuickSessionId(sessionId) {
+      const current = sessionId || getQuickSessionId();
+      if (!current) throw new ApiError('当前没有可用的极简会话', 0, 'session_missing');
+      return current;
+    }
+
+    function forgetQuickSession() {
+      storage.removeItem(QUICK_STORAGE_KEY);
+    }
+
+    function createQuickRecommendations(input, sessionId) {
+      const current = requireQuickSessionId(sessionId);
+      return request(`/api/v1/sessions/${current}/quick-recommendations`, {
+        method: 'POST', body: input,
+      });
+    }
+
+    function getLatestQuickRecommendations(sessionId) {
+      const current = requireQuickSessionId(sessionId);
+      return request(`/api/v1/sessions/${current}/quick-recommendations/latest`);
+    }
+
+    function sendQuickFeedback(runId, input, sessionId) {
+      const current = requireQuickSessionId(sessionId);
+      return request(`/api/v1/sessions/${current}/quick-recommendations/${runId}/feedback`, {
+        method: 'POST', body: input,
+      });
     }
 
     function restoreSession(sessionId) {
@@ -345,9 +385,12 @@
       completeExecution,
       confirmPlan,
       createSession,
+      createQuickSession,
+      createQuickRecommendations,
       currentUserId,
       ensureAnonymousUser,
       forgetSession,
+      forgetQuickSession,
       getFeedback,
       getHealth,
       getDatabaseHealth,
@@ -357,6 +400,8 @@
       getPlan,
       getProfileInsight,
       getSessionId,
+      getQuickSessionId,
+      getLatestQuickRecommendations,
       generatePlan,
       restoreSession,
       replacePlanItem,
@@ -367,6 +412,7 @@
       saveAnswer,
       savePreferences,
       saveReflection,
+      sendQuickFeedback,
       skipExecution,
       skipQuestion,
       skipPlanItem,
@@ -378,5 +424,5 @@
     };
   }
 
-  return { ApiError, DEFAULT_BASE_URL, STORAGE_KEY, USER_STORAGE_KEY, createApi };
+  return { ApiError, DEFAULT_BASE_URL, STORAGE_KEY, USER_STORAGE_KEY, QUICK_STORAGE_KEY, createApi };
 }));

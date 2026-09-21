@@ -13,6 +13,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from mvp_orchestrator import GeneratePlanRequest
+from mock_task_generation import validate_candidates
+from mock_task_service import payload_to_task
 from recommendation_module import (
     build_adjustment_reason,
     build_load_profile,
@@ -24,6 +26,9 @@ from recommendation_module import (
     select_adjusted_task,
 )
 from task_repository import CATEGORIES, Task, TaskRepository, feedback_groups_for_task_ids
+from scheduling_module import PlanItem as ScheduleItem
+from scheduling_module import Task as ScheduleTask
+from scheduling_module import build_schedule
 
 
 logger = logging.getLogger(__name__)
@@ -254,8 +259,12 @@ class PlanManagementService:
         self.orchestrator = orchestrator
         self.memory = memory
         self.user_history = user_history
-        self.tasks = TaskRepository()
+        self.tasks = TaskRepository() if getattr(orchestrator, "mock_generation", None) is None else None
         self.init_schema()
+
+    @property
+    def _mock_generation(self):
+        return getattr(self.orchestrator, "mock_generation", None)
 
     def _connect(self):
         return psycopg.connect(self.database_url)
@@ -369,12 +378,30 @@ class PlanManagementService:
             raise HTTPException(status_code=404, detail="计划不存在")
         return row[0]
 
-    @staticmethod
-    def _payload(plan: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
-        task_lookup = {
-            task.id: task
-            for task in TaskRepository().public_tasks
-        }
+    def _payload(self, plan: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+        if self._mock_generation is not None:
+            generated = {
+                task["id"]: task
+                for task in self._mock_generation.repository.list_tasks(plan["session_id"])
+            }
+            task_lookup = {task_id: payload_to_task(task) for task_id, task in generated.items()}
+        else:
+            generated = {}
+            task_lookup = {task.id: task for task in TaskRepository().public_tasks}
+
+        def enrich(item: dict[str, Any]) -> dict[str, Any]:
+            payload = enrich_plan_item_payload(item, task_lookup.get(item["task_id"]))
+            source = generated.get(item["task_id"])
+            if source is not None:
+                for key in (
+                    "reason_text", "generation_reason", "recommendation_reason",
+                    "first_action", "prerequisites", "evidence_refs",
+                    "generation_mode", "load_profile", "warning_text",
+                ):
+                    payload[key] = source.get(key)
+                payload["match_score"] = None
+            return payload
+
         return {
             "plan_id": plan["id"],
             "session_id": plan["session_id"],
@@ -385,10 +412,7 @@ class PlanManagementService:
             "parent_plan_id": plan["parent_plan_id"],
             "status": plan["status"],
             "unscheduled_task_ids": list(plan["unscheduled_task_ids"] or []),
-            "items": [
-                enrich_plan_item_payload(item, task_lookup.get(item["task_id"]))
-                for item in items
-            ],
+            "items": [enrich(item) for item in items],
         }
 
     def _require(self, session_id: str, plan_id: str) -> dict[str, Any]:
@@ -540,6 +564,11 @@ class PlanManagementService:
         current = self._find_item(plan, item_id)
         if current["kind"] != "task":
             raise HTTPException(status_code=400, detail="只能替换任务项")
+        if self._mock_generation is not None:
+            return self._replace_mock_item(
+                session_id, plan, current, item_id, user_id,
+                replacement_task_id=replacement_task_id,
+            )
         session = self.sessions.require_active(session_id)
         budget_limit = {"low": 20, "medium": 40, "high": 80}.get(session.preferences.get("budget"), 40)
         max_duration = {"half": 270, "day": 480}.get(session.preferences.get("duration"), 270)
@@ -601,6 +630,10 @@ class PlanManagementService:
         current = self._find_item(plan, item_id)
         if current["kind"] != "task":
             raise HTTPException(status_code=400, detail="只能调节任务项")
+        if self._mock_generation is not None:
+            return self._replace_mock_item(
+                session_id, plan, current, item_id, user_id, adjustment=adjustment,
+            )
         session = self.sessions.require_active(session_id)
         current_task = next(
             (task for task in self.tasks.public_tasks if task.id == current["task_id"]),
@@ -676,6 +709,10 @@ class PlanManagementService:
         current = self._find_item(plan, item_id)
         if current["kind"] != "task":
             raise HTTPException(status_code=400, detail="只能替换任务项")
+        if self._mock_generation is not None:
+            return self._replace_mock_item(
+                session_id, plan, current, item_id, user_id, adjustment="easier",
+            )
         used_ids = {item["task_id"] for item in plan["items"] if item["task_id"]}
         used_ids.update(normalize_replacement_history(current.get("replacement_history")))
         if self.memory is not None and current.get("task_id"):
@@ -708,6 +745,87 @@ class PlanManagementService:
         self._record_replacement_history(user_id, session_id, plan_id, item_id, saved, candidate.id)
         return saved
 
+    def _replace_mock_item(
+        self,
+        session_id: str,
+        plan: dict[str, Any],
+        current: dict[str, Any],
+        item_id: str,
+        user_id: str | None,
+        *,
+        adjustment: str | None = None,
+        replacement_task_id: str | None = None,
+    ) -> dict[str, Any]:
+        if current["status"] in {"active", "completed"}:
+            raise HTTPException(status_code=409, detail="进行中或已完成的任务不能替换")
+        service = self._mock_generation
+        current_task = service.repository.get_task(session_id, current["task_id"])
+        if current_task is None:
+            raise HTTPException(status_code=404, detail="当前模拟任务不存在")
+        profile = self.orchestrator._build_profile(session_id)
+        context = self.orchestrator._generation_context(
+            session_id,
+            profile,
+            GeneratePlanRequest(
+                free_start=self._parse_time(plan["free_start"]),
+                free_end=self._parse_time(plan["free_end"]),
+                density=plan["density"],
+            ),
+        )
+        used_ids = {item["task_id"] for item in plan["items"] if item.get("task_id")}
+        used_ids.update(normalize_replacement_history(current.get("replacement_history")))
+        used_ids.update(self._replacement_excluded_task_ids(session_id))
+        if replacement_task_id is not None:
+            if replacement_task_id in used_ids:
+                raise HTTPException(status_code=409, detail="该任务已在当前计划或替换历史中")
+            candidate = service.repository.get_task(session_id, replacement_task_id)
+            if candidate is None or candidate["category"] != current["category"]:
+                raise HTTPException(status_code=404, detail="指定的模拟替换任务不存在")
+            accepted, _ = validate_candidates([candidate], context, set())
+            if not accepted:
+                raise HTTPException(status_code=409, detail="指定任务不符合当前限制条件")
+        else:
+            candidate = service.generate_one(
+                context, current["category"], used_ids,
+                current=current_task, adjustment=adjustment,
+            )
+        session = self.sessions.require_active(session_id)
+        budget_limit = {"low": 20, "medium": 40, "high": 80}.get(session.preferences.get("budget"), 40)
+        other_cost = sum(
+            (service.repository.get_task(session_id, item["task_id"]) or {}).get("budget", 0)
+            for item in plan["items"]
+            if item["kind"] == "task" and item["status"] != "skipped"
+            and item["id"] != item_id and item.get("task_id")
+        )
+        if other_cost + candidate["budget"] > budget_limit:
+            raise HTTPException(status_code=409, detail="替换后计划总预算会超出限制")
+        start = self._parse_time(current["start_at"])
+        end = self._parse_time(current["end_at"])
+        self._ensure_slot(plan, start, end, item_id)
+        items = [dict(item) for item in plan["items"]]
+        for item in items:
+            if item["id"] == item_id:
+                item.update(build_replaced_item(item, payload_to_task(candidate)))
+        saved = self._save_version(plan, items)
+        if adjustment is not None:
+            reason = build_adjustment_reason(
+                payload_to_task(current_task), payload_to_task(candidate), adjustment
+            )
+            for item in saved["items"]:
+                if item.get("task_id") == candidate["id"]:
+                    item["adjustment_reason"] = reason
+                    item["replacement_reason"] = reason
+                    break
+        if self.memory is not None:
+            self.memory.record_task_adjustment(
+                session_id, current["task_id"], adjustment or "replace"
+            )
+            saved["recommendation_memory"] = self.memory.summary(session_id)
+        self._record_replacement_history(
+            user_id, session_id, plan["plan_id"], item_id, saved, candidate["id"]
+        )
+        return saved
+
     def _record_replacement_history(
         self,
         user_id: str | None,
@@ -737,8 +855,12 @@ class PlanManagementService:
     ) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)
         self._check_version(plan, expected_version)
-        candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
-        task = next((candidate for candidate in candidates if candidate.id == task_id), None)
+        if self._mock_generation is not None:
+            generated = self._mock_generation.repository.get_task(session_id, task_id)
+            task = payload_to_task(generated) if generated is not None else None
+        else:
+            candidates = self.tasks.public_tasks + self.tasks.custom_tasks.get(session_id, [])
+            task = next((candidate for candidate in candidates if candidate.id == task_id), None)
         if task is None:
             raise HTTPException(status_code=404, detail="推荐任务不存在")
         if any(
@@ -746,6 +868,29 @@ class PlanManagementService:
             for item in plan["items"]
         ):
             raise HTTPException(status_code=409, detail="该任务已经在当前计划中")
+
+        if self._mock_generation is not None:
+            profile = self.orchestrator._build_profile(session_id)
+            context = self.orchestrator._generation_context(
+                session_id,
+                profile,
+                GeneratePlanRequest(
+                    self._parse_time(plan["free_start"]),
+                    self._parse_time(plan["free_end"]),
+                    plan["density"],
+                ),
+            )
+            accepted, _ = validate_candidates([generated], context, set())
+            if not accepted:
+                raise HTTPException(status_code=409, detail="该推荐任务不符合当前限制条件")
+            other_cost = sum(
+                (self._mock_generation.repository.get_task(session_id, item["task_id"]) or {}).get("budget", 0)
+                for item in plan["items"]
+                if item["kind"] == "task" and item["status"] != "skipped"
+                and item.get("task_id")
+            )
+            if other_cost + generated["budget"] > context["hard_constraints"]["budget_limit"]:
+                raise HTTPException(status_code=409, detail="加入后计划总预算会超出限制")
 
         cursor = self._parse_time(plan["free_start"])
         active = sorted(
@@ -828,6 +973,8 @@ class PlanManagementService:
     def replan(self, session_id: str, plan_id: str, expected_version: int, density: str | None = None) -> dict[str, Any]:
         plan = self._require(session_id, plan_id)
         self._check_version(plan, expected_version)
+        if self._mock_generation is not None:
+            return self._replan_mock(session_id, plan, density or plan["density"])
         result = self.orchestrator.generate_plan(
             session_id,
             GeneratePlanRequest(
@@ -840,3 +987,97 @@ class PlanManagementService:
         if self.memory is not None:
             payload["recommendation_memory"] = self.memory.summary(session_id)
         return payload
+
+    def _replan_mock(self, session_id: str, plan: dict[str, Any], density: str) -> dict[str, Any]:
+        profile = self.orchestrator._build_profile(session_id)
+        request = GeneratePlanRequest(
+            self._parse_time(plan["free_start"]),
+            self._parse_time(plan["free_end"]),
+            density,
+        )
+        context = self.orchestrator._generation_context(session_id, profile, request)
+        excluded_ids = {
+            item["task_id"] for item in plan["items"]
+            if item["status"] == "skipped" and item.get("task_id")
+        }
+        for item in plan["items"]:
+            excluded_ids.update(
+                set(normalize_replacement_history(item.get("replacement_history")))
+                - {item.get("task_id")}
+            )
+        excluded_ids.update(self._replacement_excluded_task_ids(session_id))
+        generated = {
+            task["id"]: task
+            for task in self._mock_generation.repository.list_tasks(session_id)
+        }
+        candidates, _ = validate_candidates(
+            [task for task_id, task in generated.items() if task_id not in excluded_ids],
+            context,
+            set(),
+        )
+        locked = [
+            ScheduleItem(
+                id=item["id"],
+                task_id=item.get("task_id"),
+                title=item["title"],
+                category=item["category"],
+                start_at=self._parse_time(item["start_at"]),
+                end_at=self._parse_time(item["end_at"]),
+                kind=item["kind"],
+                status=item["status"],
+                locked=True,
+            )
+            for item in plan["items"]
+            if item["status"] != "skipped"
+            and (item.get("locked") or item["status"] in {"active", "completed"})
+        ]
+        tasks = [
+            ScheduleTask(
+                id=task["id"], title=task["title"], category=task["category"],
+                duration=task["duration"], score=float(context["profile_scores"].get(task["category"], 0)),
+            )
+            for task in candidates
+        ]
+        if not tasks and not locked:
+            raise HTTPException(status_code=409, detail="当前没有可以重新排程的模拟任务")
+        budgets = {task_id: task["budget"] for task_id, task in generated.items()}
+        budget_limit = context["hard_constraints"]["budget_limit"]
+        locked_cost = sum(
+            budgets.get(item.task_id, 0)
+            for item in locked if item.kind == "task"
+        )
+        if locked_cost > budget_limit:
+            raise HTTPException(status_code=409, detail="已锁定任务的预算超过了当前限制，请先调整条件")
+        while True:
+            draft = build_schedule(
+                session_id, tasks, request.free_start, request.free_end,
+                density, locked_items=locked,
+                version=plan["version"] + 1,
+                parent_plan_id=plan["plan_id"],
+            )
+            scheduled = [
+                item.task_id for item in draft.items
+                if item.kind == "task" and item.task_id and item.task_id not in {locked_item.task_id for locked_item in locked}
+            ]
+            if locked_cost + sum(budgets.get(task_id, 0) for task_id in scheduled) <= budget_limit:
+                break
+            most_expensive = max(scheduled, key=lambda task_id: budgets.get(task_id, 0))
+            tasks = [task for task in tasks if task.id != most_expensive]
+        old_by_id = {item["id"]: item for item in plan["items"]}
+        items = []
+        for item in draft.items:
+            previous = old_by_id.get(item.id, {})
+            items.append({
+                "id": item.id, "task_id": item.task_id, "title": item.title,
+                "category": item.category, "start_at": item.start_at.isoformat(),
+                "end_at": item.end_at.isoformat(), "kind": item.kind,
+                "status": item.status, "locked": item.locked,
+                "replacement_history": normalize_replacement_history(previous.get("replacement_history")),
+            })
+        saved = self._save_version(
+            {**plan, "density": density, "unscheduled_task_ids": list(draft.unscheduled_task_ids)},
+            items,
+        )
+        if self.memory is not None:
+            saved["recommendation_memory"] = self.memory.summary(session_id)
+        return saved

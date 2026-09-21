@@ -3,6 +3,9 @@
   const flow = window.FreeTimeFlow;
   const app = document.querySelector('.app-shell');
   const toast = document.querySelector('#toast');
+  const PRODUCT_MODE_KEY = 'free_time_agent_product_mode';
+  const QUICK_DRAFT_KEY = 'free_time_agent_quick_draft';
+  const QUICK_SELECTED_KEY = 'free_time_agent_quick_selected_task';
   const categories = [
     { id: 'energy', name: '活力充电', description: '运动、走动与身体恢复', icon: 'activity' },
     { id: 'calm', name: '松弛疗愈', description: '减压、休息与情绪恢复', icon: 'wind' },
@@ -38,6 +41,12 @@
 
   const state = {
     step: 'booting',
+    productMode: null,
+    quickSessionId: null,
+    quickDraft: { available_minutes: '', energy_level: '' },
+    quickRun: null,
+    quickShowMore: false,
+    quickRestSelected: false,
     sessionId: null,
     userId: null,
     selectedCategories: [],
@@ -110,6 +119,31 @@
     toast.classList.add('is-visible');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2600);
+  }
+
+  function saveQuickDraft() {
+    window.localStorage.setItem(QUICK_DRAFT_KEY, JSON.stringify(state.quickDraft));
+  }
+
+  function restoreQuickDraft() {
+    try {
+      const draft = JSON.parse(window.localStorage.getItem(QUICK_DRAFT_KEY) || 'null');
+      if (draft && typeof draft === 'object') {
+        state.quickDraft = {
+          available_minutes: draft.available_minutes ?? '',
+          energy_level: draft.energy_level || '',
+        };
+      }
+    } catch (_) {
+      state.quickDraft = { available_minutes: '', energy_level: '' };
+    }
+  }
+
+  function chooseProductMode(mode) {
+    state.productMode = mode;
+    window.localStorage.setItem(PRODUCT_MODE_KEY, mode);
+    state.error = '';
+    state.retryTask = null;
   }
 
   async function copyText(text) {
@@ -202,6 +236,67 @@
       <h1>正在恢复你的留白</h1>
       <p class="lead">正在恢复你的留白进度，稍等一下。</p>
       ${errorBanner()}
+    </section>`;
+  }
+
+  function modeSwitch() {
+    return `<nav class="product-switch" aria-label="产品模式">
+      <button class="${state.productMode === 'quick' ? 'is-active' : ''}" data-action="switch-product" data-mode="quick" aria-current="${state.productMode === 'quick' ? 'page' : 'false'}" ${state.busy ? 'disabled' : ''}>极简模式</button>
+      <button class="${state.productMode === 'full' ? 'is-active' : ''}" data-action="switch-product" data-mode="full" aria-current="${state.productMode === 'full' ? 'page' : 'false'}" ${state.busy ? 'disabled' : ''}>完整模式</button>
+    </nav>`;
+  }
+
+  function renderProductChoice() {
+    return `<section class="screen product-choice">
+      <p class="eyebrow">留白计划</p>
+      <h1>刚好空出来一点时间？</h1>
+      <p class="lead">选一种适合现在的安排。</p>
+      <div class="product-options">
+        <button class="product-option quick-option" data-action="switch-product" data-mode="quick">
+          <span class="pixel-pet cat" aria-hidden="true"></span>
+          <span><strong>马上找件小事</strong><small>填时长和精力，看看现在能做什么</small></span>
+          <i data-lucide="arrow-right" aria-hidden="true"></i>
+        </button>
+        <button class="product-option" data-action="switch-product" data-mode="full">
+          <span class="pixel-pet dog" aria-hidden="true"></span>
+          <span><strong>认真安排空闲</strong><small>问卷、偏好画像、任务时间线</small></span>
+          <i data-lucide="arrow-right" aria-hidden="true"></i>
+        </button>
+      </div>
+    </section>`;
+  }
+
+  function quickTask(task) {
+    return `<div class="quick-task-meta"><span>${escapeHtml(task.category)}</span><span>约 ${escapeHtml(task.duration_minutes)} 分钟</span></div>
+      <h2>${escapeHtml(task.title)}</h2>
+      <p class="quick-reason">${escapeHtml(task.reason)}</p>
+      <div class="quick-first-action"><span>现在先做</span><strong>${escapeHtml(task.first_action)}</strong></div>`;
+  }
+
+  function renderQuick() {
+    const run = state.quickRun;
+    const current = run && run.primary_task;
+    const alternatives = run && Array.isArray(run.alternatives) ? run.alternatives : [];
+    const liked = current && (run.feedback || []).some((item) => item.task_id === current.id && item.action === 'liked');
+    const minutes = state.quickDraft.available_minutes;
+    return `<section class="screen quick-screen">
+      <div class="quick-heading"><span class="pixel-pet cat" aria-hidden="true"></span><div><p class="eyebrow">极简模式</p><h1>找一件现在能做的小事</h1></div></div>
+      <form class="quick-form" id="quick-form">
+        <label for="quick-minutes">我有多少分钟</label>
+        <input id="quick-minutes" name="quick-minutes" type="number" inputmode="numeric" min="1" max="480" required value="${escapeHtml(minutes)}" ${state.busy ? 'disabled' : ''}>
+        <fieldset><legend>现在的精力</legend>
+          ${[['low', '有点累'], ['medium', '还可以'], ['high', '精力充足']].map(([value, label]) => `<label class="quick-energy"><input type="radio" name="quick-energy" value="${value}" ${state.quickDraft.energy_level === value ? 'checked' : ''} ${state.busy ? 'disabled' : ''}><span>${label}</span></label>`).join('')}
+        </fieldset>
+        <button class="button primary" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? '正在寻找' : '看看现在能做什么'}<i data-lucide="arrow-right" aria-hidden="true"></i></button>
+      </form>
+      ${run && run.run_id ? `<div class="quick-result">
+        ${state.quickRestSelected ? `<div class="quick-rest-state"><h2>这段时间就好好休息</h2><p>休息也是一种安排。</p></div>` : current ? `<div class="quick-primary" aria-live="polite">${quickTask(current)}
+          <div class="quick-actions"><button class="button secondary compact" data-action="quick-like" ${state.busy ? 'disabled' : ''}>${liked ? '已喜欢' : '喜欢'}</button><button class="button ghost compact" data-action="quick-dislike" ${state.busy ? 'disabled' : ''}>不喜欢</button></div>
+        </div>` : `<div class="quick-empty"><h2>当前条件下暂无合适建议</h2><p>可以调整时长，或者直接休息。</p></div>`}
+        ${!state.quickRestSelected && alternatives.length ? `<div class="quick-more"><button class="button ghost compact" data-action="quick-toggle-more" aria-expanded="${state.quickShowMore}">${state.quickShowMore ? '收起' : `查看更多（${alternatives.length}）`}</button>
+          ${state.quickShowMore ? `<div class="quick-alternatives">${alternatives.map((task) => `<button class="quick-alternative" data-action="quick-select-task" data-task-id="${escapeHtml(task.id)}" ${state.busy ? 'disabled' : ''}><strong>${escapeHtml(task.title)}</strong><span>${escapeHtml(task.duration_minutes)} 分钟 · 居家 · 无需花费 · 独处可做</span><span>${escapeHtml(task.first_action)}</span></button>`).join('')}</div>` : ''}</div>` : ''}
+        ${!state.quickRestSelected ? `<button class="button quick-rest" data-action="quick-rest" ${state.busy ? 'disabled' : ''}>直接休息</button>` : ''}
+      </div>` : ''}
     </section>`;
   }
 
@@ -421,7 +516,9 @@
     return `<div class="recommendation-explain" aria-label="推荐理由">
       <div class="recommendation-explain-title">
         <strong>为什么适合现在</strong>
-        <span class="recommendation-score-pill">推荐可信度 ${escapeHtml(score)}</span>
+        ${summary.generationMode === 'mock'
+          ? '<span class="recommendation-score-pill">模拟生成</span>'
+          : `<span class="recommendation-score-pill">推荐可信度 ${escapeHtml(score)}</span>`}
       </div>
       <p>${escapeHtml(text)}</p>
     </div>`;
@@ -511,6 +608,11 @@
         <div class="history-stat"><span>跳过/替换</span><strong>${escapeHtml((summary.skipped_count ?? 0) + (summary.replaced_count ?? 0))}</strong></div>
         <div class="history-stat"><span>低分反馈</span><strong>${escapeHtml(summary.low_rating_count ?? 0)}</strong></div>
       </div>
+      <div class="history-quick-feedback">
+        <h3>极简反馈</h3>
+        <p>喜欢 ${escapeHtml(insight.quick_feedback?.liked_count ?? 0)} · 不喜欢 ${escapeHtml(insight.quick_feedback?.disliked_count ?? 0)}。这些选择用于调整推荐，不算完成任务。</p>
+        ${historyList(insight.quick_feedback?.recent, '还没有极简模式反馈。', (item) => `<div class="history-row"><strong>${escapeHtml(item.title)}</strong><span>${item.action === 'liked' ? '喜欢' : '不喜欢'}</span></div>`)}
+      </div>
       <div class="history-grid">
         <article class="history-card">
           <h3>本周完成了哪些任务</h3>
@@ -547,6 +649,12 @@
     const item = items.find((entry) => entry.id === state.detailItemId);
     if (!item) return '';
     const summary = flow.taskReasonSummary(item);
+    const evidenceLabels = summary.evidenceRefs.map((ref) => {
+      if (ref === 'preference.categories') return '本次选择的兴趣方向';
+      if (ref.startsWith('profile:')) return `问卷画像：${ref.slice('profile:'.length)}`;
+      if (ref.startsWith('question:')) return `问卷回答：${ref.slice('question:'.length)}`;
+      return `本次填写的${ref.replace('preference.', '')}`;
+    });
     return `<div class="detail-backdrop" data-action="close-detail">
       <article class="detail-dialog" role="dialog" aria-modal="true" aria-label="任务推荐理由" onclick="event.stopPropagation()">
         <div class="detail-header">
@@ -554,14 +662,18 @@
           <button class="icon-button" data-action="close-detail" aria-label="关闭详情"><i data-lucide="x"></i></button>
         </div>
         ${reasonTags(item)}
-        <div class="reason-score-row">
+        ${summary.generationMode === 'mock' ? '' : `<div class="reason-score-row">
           <span>匹配分</span>
           <strong>${summary.matchScore === null ? '--' : Math.round(summary.matchScore * 100)}</strong>
-        </div>
+        </div>`}
         ${loadProfile(summary)}
         ${summary.matchedPreferences.length ? `<div class="matched-preferences">${summary.matchedPreferences.map((entry) => `<span>${escapeHtml(entry)}</span>`).join('')}</div>` : ''}
         ${summary.warningText ? `<div class="warning-note">${escapeHtml(summary.warningText)}</div>` : ''}
-        <div class="reason-text">${escapeHtml(summary.text).replace(/\n/g, '<br>')}</div>
+        ${summary.firstAction ? `<div class="reason-text"><strong>第一步：</strong>${escapeHtml(summary.firstAction)}</div>` : ''}
+        ${summary.prerequisites.length ? `<div class="reason-text"><strong>前置条件：</strong>${escapeHtml(summary.prerequisites.join('、'))}</div>` : ''}
+        ${summary.generationReason ? `<div class="reason-text"><strong>任务生成依据：</strong>${escapeHtml(summary.generationReason)}</div>` : ''}
+        <div class="reason-text">${summary.recommendationReason ? `<strong>推荐原因：</strong>${escapeHtml(summary.recommendationReason)}` : escapeHtml(summary.text).replace(/\n/g, '<br>')}</div>
+        ${evidenceLabels.length ? `<div class="matched-preferences">${evidenceLabels.map((label) => `<span>${escapeHtml(label)}</span>`).join('')}</div>` : ''}
       </article>
     </div>`;
   }
@@ -652,7 +764,7 @@
       : '';
     return `<article class="timeline-item pixel-timeline-item recommended-task-card status-${escapeHtml(status)} ${item.recommendationOnly ? 'is-recommendation-only' : ''} ${status === 'skipped' ? 'is-skipped' : ''}">
       <div class="timeline-time"><span class="pixel-time-index">${String(index + 1).padStart(2, '0')}</span><span class="timeline-time-label">推荐时间</span>${time}</div>
-      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span class="pixel-task-meta-line">${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${recommendationExplain(item)}${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
+      <div class="pixel-task-content"><div class="pixel-task-header"><div><strong>${escapeHtml(item.title)}</strong><span class="pixel-task-meta-line">${escapeHtml(item.category)} · ${executionStatusLabel(status)}</span></div>${replaceButton}</div>${recommendationExplain(item)}${item.first_action ? `<p class="mock-first-action"><strong>第一步</strong> ${escapeHtml(item.first_action)}</p>` : ''}${reasonTags(item)}${taskLoadSummary(item)}${adjustmentButtons(item)}<div class="timeline-actions">
         ${executionActions(item, plan)}
         ${detailButton}
         ${editButton}
@@ -745,6 +857,8 @@
   function render() {
     const renderers = {
       booting: renderBooting,
+      'product-choice': renderProductChoice,
+      quick: renderQuick,
       welcome: renderWelcome,
       profile: renderProfile,
       mode: renderMode,
@@ -753,7 +867,8 @@
       result: renderResult,
     };
     const body = renderers[state.step]();
-    app.innerHTML = `${state.step === 'booting' ? '' : header()}${state.step === 'booting' ? '' : errorBanner()}${body}`;
+    const inFullFlow = state.productMode === 'full' && !['booting', 'product-choice'].includes(state.step);
+    app.innerHTML = `${inFullFlow ? header() : ''}${['booting', 'product-choice'].includes(state.step) ? '' : modeSwitch()}${state.step === 'booting' ? '' : errorBanner()}${body}`;
     renderIcons();
   }
 
@@ -868,6 +983,47 @@
     }
   }
 
+  async function runQuickTask(task) {
+    state.busy = true;
+    state.error = '';
+    state.retryTask = null;
+    render();
+    try {
+      await task();
+    } catch (error) {
+      if ([404, 410].includes(error.status)) {
+        api.forgetQuickSession();
+        state.quickSessionId = null;
+        state.quickRun = null;
+        state.error = '极简会话已失效，请重新生成建议';
+        state.retryTask = null;
+      } else {
+        state.error = error.message || '请求失败，请稍后重试';
+        state.retryTask = task;
+      }
+    } finally {
+      state.busy = false;
+      render();
+    }
+  }
+
+  async function restoreQuick() {
+    state.quickSessionId = api.getQuickSessionId();
+    state.quickRun = null;
+    state.quickRestSelected = false;
+    if (!state.quickSessionId) return;
+    try {
+      const run = await api.getLatestQuickRecommendations(state.quickSessionId);
+      const selected = window.localStorage.getItem(QUICK_SELECTED_KEY);
+      state.quickRun = selected ? flow.selectQuickTask(run, selected) : run;
+      state.quickRestSelected = (run.feedback || []).some((item) => item.action === 'rest_selected');
+    } catch (error) {
+      if (![404, 410].includes(error.status)) throw error;
+      api.forgetQuickSession();
+      state.quickSessionId = null;
+    }
+  }
+
   function goToNextUnhandled() {
     const next = state.questions.findIndex(
       (question, index) => index > state.currentIndex && !state.answers[question.id],
@@ -888,11 +1044,22 @@
     try {
       await api.getHealth();
       await api.getDatabaseHealth();
+      restoreQuickDraft();
+      state.productMode = window.localStorage.getItem(PRODUCT_MODE_KEY);
       try {
         const user = await api.ensureAnonymousUser();
         state.userId = user.user_id || null;
       } catch (_) {
         state.userId = api.currentUserId ? api.currentUserId() : null;
+      }
+      if (state.productMode === 'quick') {
+        await restoreQuick();
+        state.step = 'quick';
+        return;
+      }
+      if (state.productMode !== 'full') {
+        state.step = 'product-choice';
+        return;
       }
       const storedSessionId = api.getSessionId();
       if (!storedSessionId) {
@@ -1048,6 +1215,60 @@
     const control = event.target.closest('[data-action]');
     if (!control || control.disabled) return;
     const action = control.dataset.action;
+    if (action === 'switch-product') {
+      if (state.busy) return;
+      chooseProductMode(control.dataset.mode);
+      if (state.productMode === 'quick') {
+        await runQuickTask(async () => {
+          await restoreQuick();
+          state.step = 'quick';
+        });
+      } else {
+        await initialize();
+      }
+      return;
+    }
+    if (action === 'quick-toggle-more') {
+      state.quickShowMore = !state.quickShowMore;
+      render();
+      return;
+    }
+    if (action === 'quick-select-task') {
+      state.quickRun = flow.selectQuickTask(state.quickRun, control.dataset.taskId);
+      window.localStorage.setItem(QUICK_SELECTED_KEY, state.quickRun.primary_task.id);
+      state.quickShowMore = false;
+      render();
+      return;
+    }
+    if (action === 'quick-like' || action === 'quick-dislike') {
+      const taskId = state.quickRun?.primary_task?.id;
+      if (!taskId) return;
+      await runQuickTask(async () => {
+        const feedback = await api.sendQuickFeedback(state.quickRun.run_id, {
+          action: action === 'quick-like' ? 'liked' : 'disliked', task_id: taskId,
+        }, state.quickSessionId);
+        if (feedback.action === 'disliked') {
+          state.quickRun = flow.afterQuickDislike(state.quickRun, taskId);
+          if (state.quickRun.primary_task) {
+            window.localStorage.setItem(QUICK_SELECTED_KEY, state.quickRun.primary_task.id);
+          } else {
+            window.localStorage.removeItem(QUICK_SELECTED_KEY);
+          }
+        }
+        state.quickRun.feedback = [
+          ...(state.quickRun.feedback || []).filter((item) => item.task_id !== taskId),
+          feedback,
+        ];
+      });
+      return;
+    }
+    if (action === 'quick-rest') {
+      await runQuickTask(async () => {
+        await api.sendQuickFeedback(state.quickRun.run_id, { action: 'rest_selected' }, state.quickSessionId);
+        state.quickRestSelected = true;
+      });
+      return;
+    }
     if (action === 'toggle-category') {
       const id = control.dataset.id;
       state.selectedCategories = state.selectedCategories.includes(id)
@@ -1069,7 +1290,10 @@
     if (action === 'go-welcome') { state.step = 'welcome'; render(); return; }
     if (action === 'go-mode') { state.step = 'mode'; render(); return; }
     if (action === 'previous-question') { state.currentIndex -= 1; render(); return; }
-    if (action === 'retry' && state.retryTask) { await runTask(state.retryTask); return; }
+    if (action === 'retry' && state.retryTask) {
+      await (state.productMode === 'quick' ? runQuickTask : runTask)(state.retryTask);
+      return;
+    }
     if (action === 'apply-plan-recovery') {
       const recoveryOption = state.planRecoveryOptions.find((entry) => entry.id === control.dataset.recoveryId);
       await runTask(async () => {
@@ -1442,8 +1666,48 @@
     }
   });
 
+  app.addEventListener('submit', async (event) => {
+    if (event.target.id !== 'quick-form') return;
+    event.preventDefault();
+    const minutes = Number(state.quickDraft.available_minutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 480 || !state.quickDraft.energy_level) {
+      state.error = '请输入 1 到 480 分钟，并选择当前精力';
+      render();
+      return;
+    }
+    await runQuickTask(async () => {
+      if (!state.userId) {
+        const user = await api.ensureAnonymousUser();
+        state.userId = user.user_id;
+      }
+      if (!state.quickSessionId) {
+        const session = await api.createQuickSession();
+        state.quickSessionId = session.session_id;
+      }
+      state.quickRun = await api.createQuickRecommendations({
+        available_minutes: minutes,
+        energy_level: state.quickDraft.energy_level,
+        user_id: state.userId,
+      }, state.quickSessionId);
+      state.quickRestSelected = false;
+      state.quickShowMore = false;
+      window.localStorage.removeItem(QUICK_SELECTED_KEY);
+    });
+  });
+
   app.addEventListener('change', (event) => {
     const control = event.target;
+    if (control.name === 'quick-minutes') {
+      state.quickDraft.available_minutes = control.value;
+      saveQuickDraft();
+      return;
+    }
+    if (control.name === 'quick-energy') {
+      state.quickDraft.energy_level = control.value;
+      saveQuickDraft();
+      render();
+      return;
+    }
     if (control.name && Object.prototype.hasOwnProperty.call(state.profile, control.name)) {
       state.profile[control.name] = control.value;
       render();
@@ -1451,6 +1715,10 @@
   });
 
   app.addEventListener('input', (event) => {
+    if (event.target.name === 'quick-minutes') {
+      state.quickDraft.available_minutes = event.target.value;
+      saveQuickDraft();
+    }
     if (event.target.name === 'location') state.profile.location = event.target.value;
   });
 

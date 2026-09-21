@@ -4,7 +4,7 @@ import unittest
 
 from recommendation_module import select_adjusted_task
 from plan_module import build_replaced_item, select_replacement_task
-from task_repository import Task, feedback_groups_for_task_ids
+from task_repository import PUBLIC_TASKS, Task, feedback_groups_for_task_ids
 
 
 class PlanReplacementRuleTests(unittest.TestCase):
@@ -171,6 +171,32 @@ class PlanReplacementRuleTests(unittest.TestCase):
 
         self.assertIsNotNone(replacement)
         self.assertEqual(replacement.id, "unseen_similar")
+
+    def test_public_task_bank_supports_many_non_repeating_replacements(self) -> None:
+        current = next(task for task in PUBLIC_TASKS if task.category == "乐享探索")
+        used_ids = {current.id}
+        excluded_groups = {current.feedback_group}
+        replacements: list[str] = []
+
+        for _ in range(20):
+            replacement = select_replacement_task(
+                candidates=PUBLIC_TASKS,
+                category=current.category,
+                used_task_ids=used_ids,
+                budget_limit=80,
+                max_duration=480,
+                outing="any",
+                company="both",
+                excluded_feedback_groups=excluded_groups,
+            )
+
+            self.assertIsNotNone(replacement)
+            self.assertNotIn(replacement.id, used_ids)
+            replacements.append(replacement.id)
+            used_ids.add(replacement.id)
+            excluded_groups.add(replacement.feedback_group)
+
+        self.assertEqual(len(replacements), len(set(replacements)))
 
     def test_feedback_groups_for_task_ids_maps_seen_tasks_to_similar_groups(self) -> None:
         tasks = [

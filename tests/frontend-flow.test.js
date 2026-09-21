@@ -178,6 +178,33 @@ test('mergeRecommendedItems replaces stale recommendation cards after a task rep
   assert.equal(merged.some((item) => item.task_id === 'task_old'), false);
 });
 
+test('mergeRecommendedItems shows a replacement only once when it was also recommended', () => {
+  const items = [{
+    id: 'item_new',
+    task_id: 'task_new',
+    title: '新的任务',
+    category: '活力充电',
+    kind: 'task',
+    status: 'pending',
+    replacement_history: ['task_old', 'task_new'],
+  }];
+  const recommendations = [
+    { id: 'task_new', title: '新的任务', category: '活力充电' },
+    { id: 'task_other', title: '其他任务', category: '活力充电' },
+    { id: 'task_old', title: '旧任务', category: '活力充电' },
+  ];
+
+  const merged = mergeRecommendedItems(items, recommendations);
+
+  assert.deepEqual(merged.map((item) => item.task_id), ['task_other', 'task_new']);
+  assert.equal(merged.filter((item) => item.id === 'item_new').length, 1);
+  assert.equal(merged[1].recommendationOnly, false);
+
+  const originalFirst = mergeRecommendedItems(items, [...recommendations].reverse());
+  assert.deepEqual(originalFirst.map((item) => item.task_id), ['task_new', 'task_other']);
+  assert.equal(originalFirst.filter((item) => item.id === 'item_new').length, 1);
+});
+
 test('feedbackReasonOptions switches to dislike reasons for low ratings', () => {
   assert.deepEqual(feedbackReasonOptions(2), [
     '太累',
@@ -217,6 +244,24 @@ test('planFailureRecoveryOptions converts backend 409 details into actionable fi
     company: 'both',
     budget: 'high',
   });
+});
+
+test('mock task reasons have no fabricated score and retain source evidence', () => {
+  const summary = taskReasonSummary({
+    category: '松弛疗愈',
+    generation_mode: 'mock',
+    match_score: null,
+    reason_text: '适合当前预算。',
+    generation_reason: '根据本次兴趣方向生成。',
+    recommendation_reason: '可在家完成。',
+    first_action: '找一个安静位置。',
+    prerequisites: [],
+    evidence_refs: ['preference.categories', 'profile:松弛疗愈'],
+  });
+  assert.equal(summary.generationMode, 'mock');
+  assert.equal(summary.matchScore, null);
+  assert.equal(summary.firstAction, '找一个安静位置。');
+  assert.deepEqual(summary.evidenceRefs, ['preference.categories', 'profile:松弛疗愈']);
 });
 
 test('lifeContextSummary converts real-life constraints into readable labels', () => {

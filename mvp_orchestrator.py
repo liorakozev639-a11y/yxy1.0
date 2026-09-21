@@ -10,9 +10,12 @@ from typing import Any, Optional, Protocol
 
 from fastapi import HTTPException
 
+from candidate_provider import CandidateProvider, RecommendationContext, TaskBankProvider, is_full_eligible
 from delivery_module import Plan as DeliveryPlan
 from delivery_module import PlanItem as DeliveryPlanItem
 from delivery_module import WebDeliveryService
+from mock_task_generation import build_generation_context
+from mock_task_service import payload_to_task
 from profile_module import Answer as ProfileAnswer
 from profile_module import Profile, ProfileService, Question as ProfileQuestion
 from profile_module import build_profile_insight
@@ -387,6 +390,8 @@ class MVPOrchestrator:
         delivery,
         memory=None,
         user_history=None,
+        mock_generation=None,
+        candidate_provider: CandidateProvider | None = None,
     ):
         self.sessions = sessions
         self.questionnaire = questionnaire
@@ -396,6 +401,12 @@ class MVPOrchestrator:
         self.delivery = delivery
         self.memory = memory
         self.user_history = user_history
+        self.mock_generation = mock_generation
+        self.candidate_provider = (
+            candidate_provider
+            if candidate_provider is not None
+            else TaskBankProvider(tasks) if tasks is not None else None
+        )
 
     def generate_plan(
         self,
@@ -408,7 +419,11 @@ class MVPOrchestrator:
 
         constraints = profile.constraints
         selected_categories = list(constraints["categories"])
-        recommendation = self._recommend(profile_data, selected_categories, user_id)
+        if self.mock_generation is not None:
+            context = self._generation_context(session_id, profile, request)
+            recommendation = self.mock_generation.recommend(context)
+        else:
+            recommendation = self._recommend(profile_data, selected_categories, user_id)
         if recommendation["missing_categories"]:
             raise HTTPException(
                 status_code=409,
@@ -421,23 +436,61 @@ class MVPOrchestrator:
                 },
             )
 
+        if self.mock_generation is not None:
+            existing = self.plans.get(session_id)
+            recommended_ids = set(recommendation["task_ids"])
+            if (
+                existing is not None
+                and existing.free_start == request.free_start
+                and existing.free_end == request.free_end
+                and existing.density == request.density
+                and any(item.task_id in recommended_ids for item in existing.items)
+            ):
+                web_plan = self._to_delivery_plan(existing)
+                delivered = self.delivery.deliver(session_id, web_plan)
+                payload = existing.to_dict()
+                self._attach_reason_metadata(
+                    payload,
+                    {"tasks": self.mock_generation.repository.list_tasks(session_id)},
+                )
+                return {
+                    "profile": profile_data,
+                    "recommendation": recommendation,
+                    "plan": payload,
+                    "delivery": delivered.to_dict() if hasattr(delivered, "to_dict") else delivered,
+                }
+
         schedule_tasks = [
             ScheduleTask(
                 id=task["id"],
                 title=task["title"],
                 category=task["category"],
                 duration=task["duration"],
-                score=float(profile.scores.get(task["category"], 0)),
+                score=float(
+                    (context["profile_scores"] if self.mock_generation is not None else profile.scores)
+                    .get(task["category"], 0)
+                ),
             )
             for task in recommendation["tasks"]
         ]
-        plan = build_schedule(
-            session_id=session_id,
-            tasks=schedule_tasks,
-            free_start=request.free_start,
-            free_end=request.free_end,
-            density=request.density,
-        )
+        while True:
+            plan = build_schedule(
+                session_id=session_id,
+                tasks=schedule_tasks,
+                free_start=request.free_start,
+                free_end=request.free_end,
+                density=request.density,
+            )
+            if self.mock_generation is None:
+                break
+            budgets = {task["id"]: task["budget"] for task in recommendation["tasks"]}
+            scheduled_ids = [
+                item.task_id for item in plan.items if item.kind == "task" and item.task_id
+            ]
+            if sum(budgets[task_id] for task_id in scheduled_ids) <= constraints["budget_limit"]:
+                break
+            most_expensive = max(scheduled_ids, key=lambda task_id: budgets[task_id])
+            schedule_tasks = [task for task in schedule_tasks if task.id != most_expensive]
         self.plans.save(plan)
         web_plan = self._to_delivery_plan(plan)
         delivery = self.delivery.deliver(session_id, web_plan)
@@ -494,6 +547,33 @@ class MVPOrchestrator:
             preferences=constraints,
         )
 
+    def _generation_context(
+        self,
+        session_id: str,
+        profile: Profile,
+        request: GeneratePlanRequest,
+    ) -> dict[str, Any]:
+        session = self.sessions.require_active(session_id)
+        questionnaire = self.questionnaire.repository.get_questionnaire(session_id)
+        if questionnaire is None or not questionnaire.submitted:
+            raise HTTPException(status_code=409, detail="问卷尚未提交")
+        answers = self.questionnaire.repository.get_answers(session_id)
+        excluded: set[str] = set()
+        if self.memory is not None:
+            for task_id in self.memory.list_excluded_task_ids(session_id):
+                task = self.mock_generation.repository.get_task(session_id, task_id)
+                if task is not None:
+                    excluded.add(task["semantic_signature"])
+        return build_generation_context(
+            session,
+            questionnaire,
+            self.questionnaire.questions,
+            answers,
+            profile,
+            request,
+            excluded,
+        )
+
     def _recommend(
         self,
         profile: dict[str, Any],
@@ -501,15 +581,24 @@ class MVPOrchestrator:
         user_id: str | None = None,
     ) -> dict[str, Any]:
         constraints = profile["constraints"]
-        candidates = self.tasks.search_tasks(
+        if self.candidate_provider is None:
+            raise RuntimeError("任务候选来源未配置")
+        context = RecommendationContext(
+            mode="full",
             session_id=profile["session_id"],
+            user_id=user_id,
+            available_minutes=constraints["max_duration"],
+            energy_level=constraints.get("energy_level", "medium"),
+            categories=tuple(categories),
             budget_limit=constraints["budget_limit"],
-            max_duration=constraints["max_duration"],
             outing=constraints["outing"],
             company=constraints["company"],
-            categories=categories,
-            scenarios=constraints.get("scenarios"),
+            scenarios=tuple(constraints.get("scenarios") or ()),
         )
+        candidates = [
+            candidate.task for candidate in self.candidate_provider.generate(context)
+            if is_full_eligible(context, candidate)
+        ]
         excluded_groups = (
             self.memory.list_excluded_groups(profile["session_id"])
             if self.memory is not None
@@ -525,6 +614,12 @@ class MVPOrchestrator:
             if callable(list_excluded_task_ids)
             else set()
         )
+        if self.user_history is not None:
+            history_excluded_task_ids = getattr(
+                self.user_history, "excluded_task_ids", None
+            )
+            if callable(history_excluded_task_ids):
+                excluded_task_ids.update(history_excluded_task_ids(user_id))
         history_weights = (
             self.user_history.preference_weights(user_id)
             if self.user_history is not None
@@ -561,6 +656,33 @@ class MVPOrchestrator:
         profile = self._build_profile(session_id)
         profile_data = asdict(profile)
         constraints = profile.constraints
+        if self.mock_generation is not None:
+            current = self.mock_generation.repository.get_task(session_id, task_id)
+            if current is None:
+                raise HTTPException(status_code=404, detail="推荐任务不存在")
+            plan = self.plans.get(session_id)
+            if plan is None:
+                raise HTTPException(status_code=409, detail="计划尚未生成")
+            context = self._generation_context(
+                session_id,
+                profile,
+                GeneratePlanRequest(plan.free_start, plan.free_end, plan.density),
+            )
+            candidate = self.mock_generation.generate_one(
+                context, current["category"], set(current_task_ids or []) | {task_id},
+                current=current, adjustment=adjustment,
+            )
+            if self.memory is not None:
+                self.memory.record_task_adjustment(session_id, task_id, adjustment)
+            reason = build_adjustment_reason(
+                payload_to_task(current), payload_to_task(candidate), adjustment
+            )
+            return {
+                "task": {**candidate, "adjustment_reason": reason, "replacement_reason": reason},
+                "recommendation_memory": (
+                    self.memory.summary(session_id) if self.memory is not None else {}
+                ),
+            }
         current_task = next(
             (
                 task
@@ -694,6 +816,12 @@ class MVPOrchestrator:
                 "duration": task.get("duration"),
                 "budget": task.get("budget"),
                 "load_profile": task.get("load_profile"),
+                "generation_mode": task.get("generation_mode"),
+                "generation_reason": task.get("generation_reason"),
+                "recommendation_reason": task.get("recommendation_reason"),
+                "first_action": task.get("first_action"),
+                "prerequisites": task.get("prerequisites", []),
+                "evidence_refs": task.get("evidence_refs", []),
             }
             for task in recommendation.get("tasks", [])
         }
