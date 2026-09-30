@@ -7,6 +7,9 @@ CREATE TABLE IF NOT EXISTS test_users (
     deleted_at TIMESTAMPTZ
 );
 
+CREATE INDEX IF NOT EXISTS idx_test_users_cohort
+ON test_users(cohort);
+
 CREATE TABLE IF NOT EXISTS test_events (
     id TEXT PRIMARY KEY,
     anonymous_id TEXT NOT NULL REFERENCES test_users(anonymous_id) ON DELETE CASCADE,

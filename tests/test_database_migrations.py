@@ -3,13 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from database_migrations import _statements, migration_files
+from database_migrations import _statements, migration_files, run_migrations
 from session_module import PostgresSessionRepository
 
 
 class FakeConnection:
     def __init__(self) -> None:
-        self.statements: list[str] = []
+        self.executions: list[tuple[str, object]] = []
+        self.applied_versions: set[int] = set()
 
     def __enter__(self):
         return self
@@ -21,8 +22,14 @@ class FakeConnection:
         return self
 
     def execute(self, statement, params=None):
-        self.statements.append(str(statement))
+        statement = str(statement)
+        self.executions.append((statement, params))
+        if "INSERT INTO schema_migrations" in statement:
+            self.applied_versions.add(int(params[0]))
         return self
+
+    def fetchall(self):
+        return [(version,) for version in sorted(self.applied_versions)]
 
 
 class DatabaseMigrationTests(unittest.TestCase):
@@ -82,17 +89,42 @@ class DatabaseMigrationTests(unittest.TestCase):
         ):
             self.assertIn(f"'{event_type}'", sql)
 
+        for reason_code in (
+            "not_interested",
+            "low_energy",
+            "not_enough_time",
+            "over_budget",
+            "location_inconvenient",
+            "too_difficult",
+            "not_matching_current_state",
+            "other",
+        ):
+            self.assertIn(f"'{reason_code}'", sql)
+
         self.assertIn("CHECK (rating BETWEEN 1 AND 5)", sql)
+        self.assertIn(
+            "CHECK (reason_code IS NULL OR reason_code IN (",
+            sql,
+        )
         self.assertIn("UNIQUE (idempotency_key)", sql)
         self.assertIn("UNIQUE (plan_item_id)", sql)
 
-        for index in (
-            "idx_test_events_anonymous_time",
-            "idx_test_events_type_time",
-            "idx_task_test_feedback_anonymous_time",
-            "idx_admin_sessions_expiry",
-        ):
-            self.assertIn(f"CREATE INDEX IF NOT EXISTS {index}", sql)
+        expected_indexes = {
+            "idx_test_users_cohort": "ON test_users(cohort)",
+            "idx_test_events_anonymous_time": (
+                "ON test_events(anonymous_id, occurred_at DESC)"
+            ),
+            "idx_test_events_type_time": "ON test_events(event_type, received_at DESC)",
+            "idx_task_test_feedback_anonymous_time": (
+                "ON task_test_feedback(anonymous_id, created_at DESC)"
+            ),
+            "idx_admin_sessions_expiry": "ON admin_sessions(expires_at)",
+        }
+        for index, indexed_columns in expected_indexes.items():
+            self.assertIn(
+                f"CREATE INDEX IF NOT EXISTS {index}\n{indexed_columns}",
+                sql,
+            )
 
     def test_user_testing_metrics_migration_is_replay_safe_for_migration_runner(
         self,
@@ -104,13 +136,41 @@ class DatabaseMigrationTests(unittest.TestCase):
         )
         statements = list(_statements(migration.read_text(encoding="utf-8")))
 
-        self.assertEqual(len(statements), 9)
+        self.assertEqual(len(statements), 10)
         for statement in statements:
             self.assertTrue(
                 statement.startswith("CREATE TABLE IF NOT EXISTS")
                 or statement.startswith("CREATE INDEX IF NOT EXISTS"),
                 statement,
             )
+
+    def test_migration_runner_skips_002_after_recording_it(self) -> None:
+        connection = FakeConnection()
+
+        with patch("database_migrations.psycopg.connect", return_value=connection):
+            run_migrations("postgresql://controlled-test")
+            run_migrations("postgresql://controlled-test")
+
+        migration_sql = next(
+            path.read_text(encoding="utf-8")
+            for path in migration_files()
+            if path.name == "002_user_testing_metrics.sql"
+        )
+        migration_statements = list(_statements(migration_sql))
+        executed_002_statements = [
+            statement
+            for statement, _ in connection.executions
+            if statement in migration_statements
+        ]
+        recorded_002_versions = [
+            params
+            for statement, params in connection.executions
+            if "INSERT INTO schema_migrations" in statement
+            and params == (2, "002_user_testing_metrics.sql")
+        ]
+
+        self.assertEqual(executed_002_statements, list(migration_statements))
+        self.assertEqual(recorded_002_versions, [(2, "002_user_testing_metrics.sql")])
 
     def test_repository_can_skip_legacy_schema_initialization(self) -> None:
         with patch.object(PostgresSessionRepository, "init_schema") as init_schema:
