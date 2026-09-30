@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch
 
+from psycopg.errors import ForeignKeyViolation
+
 from test_observability import TestObservabilityService
 
 
@@ -34,6 +36,7 @@ class ControlledConnection:
             self.users[anonymous_id] = {
                 "anonymous_id": anonymous_id,
                 "cohort": cohort,
+                "last_seen_at": _now,
             }
             self._row = self.users[anonymous_id]
         elif "INSERT INTO test_events" in statement:
@@ -49,6 +52,8 @@ class ControlledConnection:
                 occurred_at,
                 idempotency_key,
             ) = params
+            if anonymous_id not in self.users:
+                raise ForeignKeyViolation("test_events anonymous_id must reference test_users")
             event = self.events.setdefault(
                 idempotency_key,
                 {
@@ -67,6 +72,10 @@ class ControlledConnection:
             self._row = event
         elif "INSERT INTO task_test_feedback" in statement:
             feedback_id, anonymous_id, session_id, plan_item_id, rating, comment, now = params
+            if anonymous_id not in self.users:
+                raise ForeignKeyViolation(
+                    "task_test_feedback anonymous_id must reference test_users"
+                )
             feedback = self.feedback.setdefault(
                 plan_item_id,
                 {
@@ -79,6 +88,11 @@ class ControlledConnection:
             )
             feedback.update({"rating": rating, "comment": comment})
             self._row = feedback
+        elif "UPDATE test_users SET last_seen_at" in statement:
+            last_seen_at, anonymous_id = params
+            if anonymous_id not in self.users:
+                raise ForeignKeyViolation("test_users anonymous_id must exist")
+            self.users[anonymous_id]["last_seen_at"] = last_seen_at
         elif "DELETE FROM test_users" in statement:
             anonymous_id = params[0]
             if anonymous_id in self.users:
@@ -120,7 +134,15 @@ class TestObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(params[1:3], ("student_001", "student_2026_09"))
 
     def test_identify_rejects_personal_or_control_character_identifier(self) -> None:
-        for anonymous_id in ("alice@example.com", "student_13800138000", "student_001\n"):
+        for anonymous_id in (
+            "alice@example.com",
+            "student_alice",
+            "student_Alice",
+            "student_13800138000",
+            "student_138-0013-8000",
+            "student_+8613800138000",
+            "student_001\n",
+        ):
             with self.subTest(anonymous_id=anonymous_id):
                 with self.assertRaises(ValueError):
                     self.service.identify(anonymous_id, "student_2026_09")
@@ -150,6 +172,8 @@ class TestObservabilityServiceTests(unittest.TestCase):
             )
 
     def test_record_event_preserves_only_approved_metadata_and_is_idempotent(self) -> None:
+        self.service.identify("student_001", "student_2026_09")
+
         first = self.service.record_event(
             anonymous_id="student_001",
             event_type="task_completed",
@@ -166,7 +190,7 @@ class TestObservabilityServiceTests(unittest.TestCase):
             idempotency_key="event_003",
         )
         duplicate = self.service.record_event(
-            anonymous_id="student_999",
+            anonymous_id="student_001",
             event_type="task_skipped",
             session_id=None,
             plan_id=None,
@@ -182,10 +206,34 @@ class TestObservabilityServiceTests(unittest.TestCase):
             first["metadata"],
             {"task_category": "study", "energy_level": "medium", "available_minutes": 30},
         )
-        statement, params = self.connection.executions[-2]
+        event_executions = [
+            execution
+            for execution in self.connection.executions
+            if "INSERT INTO test_events" in execution[0]
+        ]
+        statement, params = event_executions[0]
         self.assertNotIn("not-stored@example.com", statement)
         self.assertNotIn("not-stored@example.com", repr(params))
         self.assertIn("ON CONFLICT (idempotency_key)", statement)
+        self.assertEqual(
+            sum("UPDATE test_users SET last_seen_at" in statement for statement, _ in self.connection.executions),
+            2,
+        )
+
+    def test_record_event_rejects_unidentified_user(self) -> None:
+        with self.assertRaises(ForeignKeyViolation):
+            self.service.record_event(
+                anonymous_id="student_001",
+                event_type="task_completed",
+                session_id=None,
+                plan_id=None,
+                plan_item_id=None,
+                reason_code=None,
+                metadata={},
+                idempotency_key="event_004",
+            )
+
+        self.assertEqual(self.connection.events, {})
 
     def test_save_feedback_rejects_out_of_range_rating_and_long_comment(self) -> None:
         for rating in (0, 6, True):
@@ -208,6 +256,8 @@ class TestObservabilityServiceTests(unittest.TestCase):
             )
 
     def test_save_feedback_updates_duplicate_plan_item(self) -> None:
+        self.service.identify("student_001", "student_2026_09")
+
         self.service.save_feedback(
             anonymous_id="student_001",
             session_id="session_001",
@@ -226,7 +276,20 @@ class TestObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(len(self.connection.feedback), 1)
         self.assertEqual(updated["rating"], 5)
         self.assertEqual(updated["comment"], "updated")
-        self.assertIn("ON CONFLICT (plan_item_id)", self.connection.executions[-1][0])
+        self.assertIn("ON CONFLICT (plan_item_id)", self.connection.executions[-2][0])
+        self.assertIn("UPDATE test_users SET last_seen_at", self.connection.executions[-1][0])
+
+    def test_save_feedback_rejects_unidentified_user(self) -> None:
+        with self.assertRaises(ForeignKeyViolation):
+            self.service.save_feedback(
+                anonymous_id="student_001",
+                session_id="session_001",
+                plan_item_id="item_001",
+                rating=5,
+                comment=None,
+            )
+
+        self.assertEqual(self.connection.feedback, {})
 
     def test_delete_anonymous_data_removes_only_observability_records(self) -> None:
         self.service.identify("student_001", "student_2026_09")

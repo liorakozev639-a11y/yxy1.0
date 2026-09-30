@@ -44,9 +44,8 @@ REASON_CODES = frozenset(
         "other",
     }
 )
-_ANONYMOUS_ID = re.compile(r"student_[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}\Z")
+_ANONYMOUS_ID = re.compile(r"student_\d{3,6}\Z")
 _COHORT = re.compile(r"student_[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z")
-_PHONE_LIKE_ID = re.compile(r"student_1\d{10}\Z")
 _MAX_COMMENT_LENGTH = 500
 
 
@@ -76,7 +75,6 @@ class TestObservabilityService:
         if (
             not isinstance(anonymous_id, str)
             or not _ANONYMOUS_ID.fullmatch(anonymous_id)
-            or _PHONE_LIKE_ID.fullmatch(anonymous_id)
         ):
             raise ValueError("anonymous_id 必须是匿名 student_ 编号")
         return anonymous_id
@@ -157,6 +155,13 @@ class TestObservabilityService:
             "created_at": row["created_at"],
         }
 
+    @staticmethod
+    def _update_last_seen(connection: Any, anonymous_id: str, occurred_at: datetime) -> None:
+        connection.execute(
+            "UPDATE test_users SET last_seen_at = %s WHERE anonymous_id = %s",
+            (occurred_at, anonymous_id),
+        )
+
     def identify(self, anonymous_id: str, cohort: str) -> dict[str, str]:
         anonymous_id = self._validate_anonymous_id(anonymous_id)
         cohort = self._validate_cohort(cohort)
@@ -228,6 +233,7 @@ class TestObservabilityService:
                     idempotency_key,
                 ),
             ).fetchone()
+            self._update_last_seen(connection, anonymous_id, occurred_at)
         if row is None:
             raise RuntimeError("测试事件保存失败")
         return self._event_payload(row)
@@ -275,6 +281,7 @@ class TestObservabilityService:
                     now,
                 ),
             ).fetchone()
+            self._update_last_seen(connection, anonymous_id, now)
         if row is None:
             raise RuntimeError("测试评价保存失败")
         return self._feedback_payload(row)
