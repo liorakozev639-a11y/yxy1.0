@@ -88,3 +88,38 @@
   integration coverage for transaction rollback or concurrent UPSERT behavior.
 - Run Task 2 against an independent PostgreSQL test database before enabling
   telemetry API endpoints.
+
+## Review Follow-up: Reason Code Event Scope
+
+### Fixes
+
+- `reason_code` is now accepted by `record_event` only for `task_skipped` and
+  `task_replaced`; `task_completed` with a valid reason code raises
+  `ValueError` before any database write.
+- `test_events` retains its reason-code allowlist and adds a PostgreSQL `CHECK`
+  requiring a non-null `reason_code` to use `task_skipped` or `task_replaced`.
+  This prevents writes that bypass the service layer while preserving the
+  migration's `CREATE ... IF NOT EXISTS` replay-safe statement structure.
+- Service and migration-contract tests cover rejection of
+  `task_completed + low_energy` and the corresponding database constraint.
+
+### Commit
+
+- `fix: constrain telemetry reason codes`
+
+### Verification
+
+- RED: `uv --cache-dir .uv-cache run --with 'psycopg[binary]>=3.3,<3.4' python -m unittest tests.test_test_observability tests.test_database_migrations -v`
+  - Failed as expected: the service deferred `task_completed + low_energy` to
+    the controlled foreign-key boundary, and the migration lacked the event
+    scope `CHECK`.
+- PASS: `uv --cache-dir .uv-cache run --with 'psycopg[binary]>=3.3,<3.4' python -m unittest tests.test_test_observability tests.test_database_migrations -v`
+  - 14 tests passed, including Task 2 service and migration tests.
+- PASS: `git diff --check`
+
+### Limitations
+
+- A real PostgreSQL instance was not contacted. The migration constraint is
+  covered by its SQL contract test only; apply the migrations and exercise an
+  invalid direct insert against an independent PostgreSQL test database before
+  enabling telemetry API endpoints.

@@ -170,6 +170,17 @@ class TestObservabilityServiceTests(unittest.TestCase):
                 metadata={},
                 idempotency_key="event_002",
             )
+        with self.assertRaises(ValueError):
+            self.service.record_event(
+                anonymous_id="student_001",
+                event_type="task_completed",
+                session_id=None,
+                plan_id=None,
+                plan_item_id=None,
+                reason_code="low_energy",
+                metadata={},
+                idempotency_key="event_003",
+            )
 
     def test_record_event_preserves_only_approved_metadata_and_is_idempotent(self) -> None:
         self.service.identify("student_001", "student_2026_09")

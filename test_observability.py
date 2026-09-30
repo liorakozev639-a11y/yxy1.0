@@ -199,6 +199,8 @@ class TestObservabilityService:
             raise ValueError("不支持的测试事件类型")
         if reason_code is not None and reason_code not in REASON_CODES:
             raise ValueError("不支持的原因代码")
+        if reason_code is not None and event_type not in {"task_skipped", "task_replaced"}:
+            raise ValueError("原因代码仅适用于跳过或替换任务事件")
         session_id = self._validate_optional_id(session_id, "session_id")
         plan_id = self._validate_optional_id(plan_id, "plan_id")
         plan_item_id = self._validate_optional_id(plan_item_id, "plan_item_id")

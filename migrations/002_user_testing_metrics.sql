@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS test_events (
         'not_matching_current_state',
         'other'
     )),
+    CHECK (reason_code IS NULL OR event_type IN ('task_skipped', 'task_replaced')),
     metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     occurred_at TIMESTAMPTZ NOT NULL,
     received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

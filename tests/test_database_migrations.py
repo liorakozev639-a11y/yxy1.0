@@ -106,6 +106,10 @@ class DatabaseMigrationTests(unittest.TestCase):
             "CHECK (reason_code IS NULL OR reason_code IN (",
             sql,
         )
+        self.assertIn(
+            "reason_code IS NULL OR event_type IN ('task_skipped', 'task_replaced')",
+            sql,
+        )
         self.assertIn("UNIQUE (idempotency_key)", sql)
         self.assertIn("UNIQUE (plan_item_id)", sql)
 
