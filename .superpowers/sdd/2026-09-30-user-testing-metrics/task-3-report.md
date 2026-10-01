@@ -21,7 +21,7 @@
 
 ## Commit
 
-- `fix: harden admin metrics service` (current Task 3 hardening commit)
+- `f095882 fix: harden admin metrics service`
 
 ## Verification
 
