@@ -41,6 +41,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                 "001_initial_schema.sql",
                 "002_user_testing_metrics.sql",
                 "003_admin_security_upgrade.sql",
+                "004_user_testing_retention_and_idempotency.sql",
             ],
         )
         sql = files[0].read_text(encoding="utf-8")
@@ -114,7 +115,12 @@ class DatabaseMigrationTests(unittest.TestCase):
             "reason_code IS NULL OR event_type IN ('task_skipped', 'task_replaced')",
             sql,
         )
-        self.assertIn("UNIQUE (idempotency_key)", sql)
+        self.assertNotIn("UNIQUE (idempotency_key)", sql)
+        self.assertIn(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_test_events_anonymous_idempotency",
+            sql,
+        )
+        self.assertIn("ON test_events(anonymous_id, idempotency_key)", sql)
         self.assertIn("UNIQUE (plan_item_id)", sql)
         self.assertNotIn("failed_login_count", sql)
         self.assertNotIn("locked_until", sql)
@@ -147,7 +153,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         )
         statements = list(_statements(migration.read_text(encoding="utf-8")))
 
-        self.assertEqual(len(statements), 10)
+        self.assertEqual(len(statements), 11)
         for statement in statements:
             self.assertTrue(
                 statement.startswith("CREATE TABLE IF NOT EXISTS")
@@ -197,7 +203,13 @@ class DatabaseMigrationTests(unittest.TestCase):
             and params == (2, "002_user_testing_metrics.sql")
         ]
 
-        self.assertEqual(executed_002_statements, list(migration_statements))
+        self.assertEqual(executed_002_statements[: len(migration_statements)], list(migration_statements))
+        self.assertEqual(
+            executed_002_statements.count(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_test_events_anonymous_idempotency\nON test_events(anonymous_id, idempotency_key)"
+            ),
+            2,
+        )
         self.assertEqual(recorded_002_versions, [(2, "002_user_testing_metrics.sql")])
 
     def test_migration_runner_upgrades_an_already_applied_002_once(self) -> None:
@@ -211,7 +223,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         upgrade_sql = next(
             path.read_text(encoding="utf-8")
             for path in migration_files()
-            if path.name == "003_admin_security_upgrade.sql"
+            if path.name == "004_user_testing_retention_and_idempotency.sql"
         )
         upgrade_statements = list(_statements(upgrade_sql))
         executed_upgrade_statements = [
@@ -223,11 +235,14 @@ class DatabaseMigrationTests(unittest.TestCase):
             params
             for statement, params in connection.executions
             if "INSERT INTO schema_migrations" in statement
-            and params == (3, "003_admin_security_upgrade.sql")
+            and params in (
+                (3, "003_admin_security_upgrade.sql"),
+                (4, "004_user_testing_retention_and_idempotency.sql"),
+            )
         ]
 
         self.assertEqual(executed_upgrade_statements, upgrade_statements)
-        self.assertEqual(recorded_upgrade_versions, [(3, "003_admin_security_upgrade.sql")])
+        self.assertEqual(recorded_upgrade_versions, [(3, "003_admin_security_upgrade.sql"), (4, "004_user_testing_retention_and_idempotency.sql")])
 
     def test_repository_can_skip_legacy_schema_initialization(self) -> None:
         with patch.object(PostgresSessionRepository, "init_schema") as init_schema:

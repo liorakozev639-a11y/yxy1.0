@@ -7,9 +7,10 @@ make telemetry non-blocking, while validation errors remain explicit.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
+import unicodedata
 import uuid
 
 import psycopg
@@ -55,8 +56,12 @@ def _make_id(prefix: str) -> str:
 
 def _is_safe_text(value: str, maximum: int) -> bool:
     return bool(value) and len(value) <= maximum and not any(
-        character in value for character in ("\n", "\r", "\t", "\x00")
+        unicodedata.category(character) == "Cc" for character in value
     )
+
+
+def _contains_control_characters(value: str) -> bool:
+    return any(unicodedata.category(character) == "Cc" for character in value)
 
 
 class TestObservabilityService:
@@ -74,6 +79,7 @@ class TestObservabilityService:
     def _validate_anonymous_id(anonymous_id: str) -> str:
         if (
             not isinstance(anonymous_id, str)
+            or _contains_control_characters(anonymous_id)
             or not _ANONYMOUS_ID.fullmatch(anonymous_id)
         ):
             raise ValueError("anonymous_id 必须是匿名 student_ 编号")
@@ -81,7 +87,11 @@ class TestObservabilityService:
 
     @staticmethod
     def _validate_cohort(cohort: str) -> str:
-        if not isinstance(cohort, str) or not _COHORT.fullmatch(cohort):
+        if (
+            not isinstance(cohort, str)
+            or _contains_control_characters(cohort)
+            or not _COHORT.fullmatch(cohort)
+        ):
             raise ValueError("cohort 必须是 student_ 测试批次编号")
         return cohort
 
@@ -171,7 +181,6 @@ class TestObservabilityService:
                 INSERT INTO test_users (id, anonymous_id, cohort, last_seen_at)
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (anonymous_id) DO UPDATE SET
-                    cohort = EXCLUDED.cohort,
                     last_seen_at = EXCLUDED.last_seen_at,
                     deleted_at = NULL
                 RETURNING anonymous_id, cohort
@@ -216,8 +225,8 @@ class TestObservabilityService:
                     id, anonymous_id, session_id, plan_id, plan_item_id, event_type,
                     reason_code, metadata_json, occurred_at, idempotency_key
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (idempotency_key) DO UPDATE SET
-                    idempotency_key = EXCLUDED.idempotency_key
+                ON CONFLICT (anonymous_id, idempotency_key) DO UPDATE SET
+                    id = test_events.id
                 RETURNING id, anonymous_id, session_id, plan_id, plan_item_id,
                           event_type, reason_code, metadata_json, occurred_at,
                           idempotency_key
@@ -294,5 +303,17 @@ class TestObservabilityService:
             result = connection.execute(
                 "DELETE FROM test_users WHERE anonymous_id = %s",
                 (anonymous_id,),
+            )
+        return result.rowcount
+
+    RETENTION_DAYS = 90
+
+    def delete_expired_data(self, *, now: datetime | None = None) -> int:
+        reference_time = now or datetime.now(timezone.utc)
+        cutoff = reference_time - timedelta(days=self.RETENTION_DAYS)
+        with self._connect() as connection:
+            result = connection.execute(
+                "DELETE FROM test_users WHERE last_seen_at < %s",
+                (cutoff,),
             )
         return result.rowcount

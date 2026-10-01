@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 from typing import Any
+import unicodedata
 import uuid
 
 import psycopg
@@ -18,7 +19,6 @@ from psycopg.rows import dict_row
 
 
 _ANONYMOUS_ID = re.compile(r"student_\d{3,6}\Z")
-_SAFE_TEXT = re.compile(r"[^\r\n\t\x00]{1,64}\Z")
 _FUNNEL_EVENTS = (
     "session_created",
     "questionnaire_completed",
@@ -55,7 +55,12 @@ class MetricsFilters:
 
     @staticmethod
     def _safe_filter(value: str, field_name: str) -> None:
-        if not isinstance(value, str) or not _SAFE_TEXT.fullmatch(value):
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > 64
+            or any(unicodedata.category(character) == "Cc" for character in value)
+        ):
             raise ValueError(f"{field_name} 必须是长度不超过 64 的安全文本")
 
 

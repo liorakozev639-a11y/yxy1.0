@@ -38,6 +38,18 @@
         </form>
 
         <p id="admin-error" class="error" role="alert"></p>
+        <section class="panel retention-panel" aria-labelledby="retention-title">
+          <h2 id="retention-title">观测数据删除</h2>
+          <p class="muted">匿名观测默认保留 90 天。删除操作不影响业务会话、计划或任务数据。</p>
+          <div class="retention-actions">
+            <form id="admin-delete-user-form" autocomplete="off">
+              <label>删除匿名用户<input name="anonymous_id" maxlength="64" placeholder="student_001" required></label>
+              <button class="button secondary" type="submit">删除该用户观测</button>
+            </form>
+            <button id="admin-cleanup" class="button secondary" type="button">清理超过 90 天的数据</button>
+          </div>
+          <p id="admin-retention-status" class="muted" role="status"></p>
+        </section>
         <div id="summary" class="metric-grid"></div>
         <div class="dashboard-grid">
           <section class="panel"><h2>流程漏斗</h2><div id="funnel"></div></section>

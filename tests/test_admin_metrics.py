@@ -215,6 +215,15 @@ class AdminMetricsServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, "^登录失败$"):
             self.service.login("管理员", "wrong")
 
+    def test_metrics_filters_reject_all_control_characters(self) -> None:
+        controls = ("\x00", "\x07", "\x0b", "\x0c", "\x1b", "\x7f", "\x85", "\x9f")
+        for control in controls:
+            with self.subTest(control=hex(ord(control))):
+                with self.assertRaises(ValueError):
+                    MetricsFilters(cohort=f"student_2026_09{control}")
+                with self.assertRaises(ValueError):
+                    MetricsFilters(task_category=f"study{control}")
+
     def test_initialization_refuses_a_second_admin_when_environment_changes(self) -> None:
         self.service.login("metrics_admin", "correct horse battery staple")
         with patch.dict(

@@ -633,6 +633,29 @@ def create_app(
     ) -> dict[str, Any]:
         return success(require_admin_service().errors(filters))
 
+    @app.delete("/api/v1/admin/test-users/{anonymous_id}")
+    def admin_delete_test_user(
+        anonymous_id: str,
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
+    ) -> dict[str, Any]:
+        try:
+            deleted = require_observability_service().delete_anonymous_data(anonymous_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return success({"anonymous_id": anonymous_id, "deleted": deleted})
+
+    @app.post("/api/v1/admin/test-observations/cleanup")
+    def admin_cleanup_test_observations(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
+    ) -> dict[str, Any]:
+        deleted = require_observability_service().delete_expired_data()
+        return success(
+            {
+                "deleted_users": deleted,
+                "retention_days": TestObservabilityService.RETENTION_DAYS,
+            }
+        )
+
     @app.post("/api/v1/sessions", status_code=201)
     def create_session() -> dict[str, Any]:
         return success(session_service.create())

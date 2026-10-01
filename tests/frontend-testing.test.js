@@ -246,3 +246,33 @@ test('admin dashboard is isolated and requests all required metric views', () =>
   assert.match(html, /个人|identity|姓名/);
   assert.match(css, /@media/);
 });
+
+test('admin dashboard exposes authenticated retention controls', async () => {
+  const calls = [];
+  const store = storage({ [ADMIN_TOKEN_STORAGE_KEY]: 'admin-token' });
+  const api = createApi({
+    storage: store,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return response(url.includes('/cleanup') ? { deleted_users: 3, retention_days: 90 } : { deleted: 1 });
+    },
+  });
+
+  await api.deleteAdminTestUser('student_001');
+  await api.cleanupAdminTestObservations();
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/v1/admin/test-users/student_001');
+  assert.equal(calls[0].options.method, 'DELETE');
+  assert.equal(calls[1].url, 'http://127.0.0.1:8000/api/v1/admin/test-observations/cleanup');
+  assert.equal(calls[1].options.method, 'POST');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer admin-token');
+
+  const html = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'admin.html'), 'utf8');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'admin.js'), 'utf8');
+  assert.match(html, /admin-delete-user-form/);
+  assert.match(html, /admin-cleanup/);
+  assert.match(html, /90 天/);
+  assert.match(js, /window\.confirm/);
+  assert.match(js, /deleteAdminTestUser/);
+  assert.match(js, /cleanupAdminTestObservations/);
+});

@@ -7,6 +7,9 @@
   const dashboard = document.querySelector('#admin-dashboard');
   const loginForm = document.querySelector('#admin-login-form');
   const filterForm = document.querySelector('#admin-filters');
+  const deleteUserForm = document.querySelector('#admin-delete-user-form');
+  const cleanupButton = document.querySelector('#admin-cleanup');
+  const retentionStatus = document.querySelector('#admin-retention-status');
   const loginError = document.querySelector('#admin-login-error');
   const dashboardError = document.querySelector('#admin-error');
   const logout = document.querySelector('#admin-logout');
@@ -98,6 +101,35 @@
     event.preventDefault();
     void loadDashboard();
   });
+
+  deleteUserForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const values = new FormData(deleteUserForm);
+    const anonymousId = String(values.get('anonymous_id') || '');
+    if (!window.confirm(`确认删除 ${anonymousId} 的匿名观测数据？业务会话和任务不会删除。`)) return;
+    retentionStatus.textContent = '';
+    try {
+      const result = await api.deleteAdminTestUser(anonymousId);
+      retentionStatus.textContent = `已删除 ${result.deleted} 条匿名用户观测数据。`;
+      deleteUserForm.reset();
+      void loadDashboard();
+    } catch (error) {
+      retentionStatus.textContent = error.message || '删除失败';
+    }
+  });
+
+  cleanupButton.addEventListener('click', async () => {
+    if (!window.confirm('确认清理最近 90 天以前的匿名观测数据？业务数据不会删除。')) return;
+    retentionStatus.textContent = '';
+    try {
+      const result = await api.cleanupAdminTestObservations();
+      retentionStatus.textContent = `已清理 ${result.deleted_users} 个匿名用户的观测数据。`;
+      void loadDashboard();
+    } catch (error) {
+      retentionStatus.textContent = error.message || '清理失败';
+    }
+  });
+
 
   logout.addEventListener('click', async () => {
     try { await api.adminLogout(); } finally { showLogin(); }

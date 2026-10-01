@@ -499,6 +499,23 @@
       });
     }
 
+    function deleteAdminTestUser(anonymousId) {
+      const encodedId = encodeURIComponent(String(anonymousId || ''));
+      const token = getAdminToken();
+      return request(`/api/v1/admin/test-users/${encodedId}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    }
+
+    function cleanupAdminTestObservations() {
+      const token = getAdminToken();
+      return request('/api/v1/admin/test-observations/cleanup', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    }
+
     async function clearSession(sessionId) {
       const current = requireSessionId(sessionId);
       const data = await request(`/api/v1/sessions/${current}/data`, {
@@ -548,6 +565,8 @@
       adminLogin,
       adminLogout,
       adminMetrics,
+      cleanupAdminTestObservations,
+      deleteAdminTestUser,
       restoreSession,
       replacePlanItem,
       replacePlanItemEasier,

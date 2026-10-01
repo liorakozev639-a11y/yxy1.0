@@ -43,14 +43,15 @@ CREATE TABLE IF NOT EXISTS test_events (
     metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     occurred_at TIMESTAMPTZ NOT NULL,
     received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    idempotency_key TEXT NOT NULL,
-    UNIQUE (idempotency_key)
+    idempotency_key TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_test_events_anonymous_time
 ON test_events(anonymous_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_test_events_type_time
 ON test_events(event_type, received_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_test_events_anonymous_idempotency
+ON test_events(anonymous_id, idempotency_key);
 
 CREATE TABLE IF NOT EXISTS task_test_feedback (
     id TEXT PRIMARY KEY,

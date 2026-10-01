@@ -30,6 +30,8 @@ class FakeObservabilityService:
         self.events: list[dict[str, object]] = []
         self.feedback: list[dict[str, object]] = []
         self.event_results: dict[str, dict[str, object]] = {}
+        self.deleted_anonymous_ids: list[str] = []
+        self.cleanup_calls = 0
         self.fail = False
 
     def identify(self, anonymous_id: str, cohort: str) -> dict[str, str]:
@@ -54,6 +56,14 @@ class FakeObservabilityService:
             raise RuntimeError("telemetry unavailable")
         self.feedback.append(payload)
         return {"feedback_id": "feedback_001", **payload}
+
+    def delete_anonymous_data(self, anonymous_id: str) -> int:
+        self.deleted_anonymous_ids.append(anonymous_id)
+        return 1
+
+    def delete_expired_data(self) -> int:
+        self.cleanup_calls += 1
+        return 3
 
 
 class FakeAdminMetricsService:
@@ -312,6 +322,40 @@ class TestingApiTests(unittest.TestCase):
 
         self.assertEqual(unauthenticated.status_code, 401, unauthenticated.text)
         self.assertEqual(authenticated.status_code, 422, authenticated.text)
+        client.close()
+
+    def test_authenticated_admin_deletion_and_cleanup_are_explicit_and_scoped(self) -> None:
+        client, observability, admin_metrics = build_client()
+
+        unauthorized_delete = client.delete(
+            "/api/v1/admin/test-users/student_001",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        unauthorized_cleanup = client.post(
+            "/api/v1/admin/test-observations/cleanup",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        authorized_delete = client.delete(
+            "/api/v1/admin/test-users/student_001",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        authorized_cleanup = client.post(
+            "/api/v1/admin/test-observations/cleanup",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+        self.assertEqual(unauthorized_delete.status_code, 401)
+        self.assertEqual(unauthorized_cleanup.status_code, 401)
+        self.assertEqual(authorized_delete.status_code, 200, authorized_delete.text)
+        self.assertEqual(authorized_delete.json()["data"], {"anonymous_id": "student_001", "deleted": 1})
+        self.assertEqual(authorized_cleanup.status_code, 200, authorized_cleanup.text)
+        self.assertEqual(
+            authorized_cleanup.json()["data"],
+            {"deleted_users": 3, "retention_days": 90},
+        )
+        self.assertEqual(observability.deleted_anonymous_ids, ["student_001"])
+        self.assertEqual(observability.cleanup_calls, 1)
+        self.assertEqual(admin_metrics.authenticated_tokens, ["invalid-token", "invalid-token", "valid-token", "valid-token"])
         client.close()
 
     def test_observation_failure_does_not_change_business_flow_or_crash_observation_route(self) -> None:
