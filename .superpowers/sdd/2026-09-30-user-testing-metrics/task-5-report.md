@@ -40,3 +40,22 @@
 
 - No live browser interaction or PostgreSQL-backed end-to-end dashboard run was available in this task; verification is focused on API wrappers, source hooks, and existing Node frontend tests.
 - Skip/replace reasons use a short post-success prompt and default to `other` when cancelled or unavailable; the primary business action has already succeeded before telemetry collection.
+
+## Review Fixes
+
+- `recommendations_viewed` now emits one event per visible recommendation with the actual `task_category` metadata for both full and quick modes. Duplicate items are collapsed and each item has a stable per-view idempotency key.
+- Added the complete adjustment-to-reason mapping: `easier -> low_energy`, `shorter -> not_enough_time`, `cheaper -> over_budget`, `nearer -> location_inconvenient`, and `less_social`/`more_growth -> not_matching_current_state`.
+- Added `createTestTelemetry`, which gives each event call a unique timestamp/sequence/random key by default and derives a stable key from `action_id` for the same action retry. User action handlers create action IDs before business requests so a retry of the same closure remains idempotent without duplicate render emissions.
+- Quick-mode failures now emit a non-blocking `flow_error` event before the existing recovery/error state handling.
+- Added executable regression coverage for recommendation payload metadata, reason mappings, unique/stable idempotency keys, and quick-mode error hooks.
+
+## Review-Fix Verification
+
+- `node --test tests/frontend-testing.test.js`
+  - PASS: 8 tests.
+- `node --test tests/frontend-flow.test.js tests/frontend-execution.test.js tests/frontend-api.test.js`
+  - PASS: 28 tests.
+- `node --check frontend/api.js; node --check frontend/app.js; node --check frontend/admin.js`
+  - PASS: all syntax checks.
+- `git diff --check`
+  - PASS: no whitespace errors. Git reported LF/CRLF normalization warnings only.

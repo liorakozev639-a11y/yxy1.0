@@ -85,6 +85,8 @@
   let toastTimer;
   let executionRefreshTimer;
   let deferredInstallPrompt = null;
+  let testActionSequence = 0;
+  let telemetryReporter = null;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
@@ -105,28 +107,22 @@
     }
   }
 
-  function telemetryId(event) {
-    return [
-      event.event_type,
-      event.session_id || state.sessionId || 'none',
-      event.plan_id || state.plan?.plan_id || 'none',
-      event.plan_item_id || 'none',
-    ].join(':');
+  function createTestActionId(action) {
+    testActionSequence += 1;
+    return `action:${action}:${Date.now().toString(36)}:${testActionSequence}`;
   }
 
   function reportTestEvent(event) {
     try {
-      const payload = {
-        ...event,
-        anonymous_id: ensureTestAnonymousId(),
-        session_id: event.session_id ?? state.sessionId ?? null,
-        metadata: event.metadata || {},
-        idempotency_key: event.idempotency_key || telemetryId(event),
-      };
-      return Promise.resolve(api.recordTestEvent(payload)).catch((error) => {
-        console.debug('test telemetry event failed', error?.code || error?.message || error);
-        return { recorded: false };
-      });
+      if (!telemetryReporter) {
+        telemetryReporter = api.createTestTelemetry({
+          getAnonymousId: ensureTestAnonymousId,
+          getSessionId: () => state.sessionId,
+          recordEvent: api.recordTestEvent,
+          logger: console,
+        });
+      }
+      return telemetryReporter.report(event);
     } catch (error) {
       console.debug('test telemetry event failed', error?.code || error?.message || error);
       return Promise.resolve({ recorded: false });
@@ -175,6 +171,40 @@
       'location_inconvenient', 'too_difficult', 'not_matching_current_state', 'other',
     ]);
     return allowed.has(value) ? value : 'other';
+  }
+
+  const ADJUSTMENT_REASON_CODES = {
+    easier: 'low_energy',
+    shorter: 'not_enough_time',
+    cheaper: 'over_budget',
+    nearer: 'location_inconvenient',
+    less_social: 'not_matching_current_state',
+    more_growth: 'not_matching_current_state',
+  };
+
+  function reasonCodeForAdjustment(adjustment) {
+    return ADJUSTMENT_REASON_CODES[adjustment] || 'other';
+  }
+
+  function reportRecommendationsViewed({ sessionId, planId, items, mode = null }) {
+    const seen = new Set();
+    (Array.isArray(items) ? items : []).forEach((rawItem, index) => {
+      const category = rawItem && (rawItem.category || rawItem.task_category);
+      if (!category) return;
+      const item = rawItem.category ? rawItem : { ...rawItem, category };
+      const identity = item.id || item.task_id || item.item_id || `index-${index}`;
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      void reportTestEvent({
+        event_type: 'recommendations_viewed',
+        session_id: sessionId ?? state.sessionId ?? null,
+        plan_id: planId ?? state.plan?.plan_id ?? null,
+        metadata: mode === 'quick'
+          ? { mode: 'quick', task_category: item.category }
+          : { task_category: item.category, ...(mode ? { mode } : {}) },
+        idempotency_key: `recommendations_viewed:${sessionId || state.sessionId || 'none'}:${planId || state.plan?.plan_id || 'none'}:${identity}`,
+      });
+    });
   }
 
   function recommendationStorageKey() {
@@ -1089,6 +1119,16 @@
     try {
       await task();
     } catch (error) {
+      const failedSessionId = state.quickSessionId;
+      void reportTestEvent({
+        event_type: 'flow_error',
+        session_id: failedSessionId,
+        metadata: {
+          mode: 'quick',
+          error_code: error.code || 'request_failed',
+          status: error.status || 0,
+        },
+      });
       if ([404, 410].includes(error.status)) {
         api.forgetQuickSession();
         state.quickSessionId = null;
@@ -1301,10 +1341,12 @@
     state.recommendation = generated.recommendation || null;
     persistRecommendation(state.recommendation);
     state.step = 'result';
-    void reportTestEvent({
-      event_type: 'recommendations_viewed',
-      plan_id: state.plan?.plan_id || null,
-      metadata: { task_count: Array.isArray(state.plan?.items) ? state.plan.items.length : 0 },
+    reportRecommendationsViewed({
+      planId: state.plan?.plan_id || null,
+      items: [
+        ...(Array.isArray(state.recommendation?.tasks) ? state.recommendation.tasks : []),
+        ...(Array.isArray(state.plan?.items) ? state.plan.items : []),
+      ],
     });
   }
 
@@ -1499,6 +1541,7 @@
     if (action === 'confirm-energy-start') {
       const plan = state.plan;
       if (!plan || !state.energyItemId || !state.energyChoice) return;
+      const actionId = createTestActionId('task_started');
       await runTask(async () => {
         const prepare = await api.prepareExecution(plan.plan_id, state.energyItemId, {
           user_id: state.userId,
@@ -1513,6 +1556,7 @@
         const item = plan.items.find((entry) => entry.id === state.energyItemId);
         void reportTestEvent({
           event_type: 'task_started',
+          action_id: actionId,
           plan_id: plan.plan_id,
           plan_item_id: state.energyItemId,
           metadata: { task_category: item?.category || null },
@@ -1526,6 +1570,7 @@
     if (action === 'replace-easier') {
       const plan = state.plan;
       if (!plan || !state.energyItemId) return;
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
         state.plan = await api.replacePlanItemEasier(plan.plan_id, state.energyItemId, {
           expected_version: plan.version,
@@ -1533,6 +1578,7 @@
         });
         void reportTestEvent({
           event_type: 'task_replaced',
+          action_id: actionId,
           plan_id: plan.plan_id,
           plan_item_id: state.energyItemId,
           reason_code: 'low_energy',
@@ -1548,6 +1594,7 @@
       const plan = state.plan;
       if (!plan) return;
       const itemId = control.dataset.itemId;
+      const actionId = createTestActionId(action);
       await runTask(async () => {
         const payload = action === 'complete-execution'
           ? await api.completeExecution(plan.plan_id, itemId, { user_id: state.userId })
@@ -1559,6 +1606,7 @@
         if (action === 'complete-execution') {
           void reportTestEvent({
             event_type: 'task_completed',
+            action_id: actionId,
             plan_id: plan.plan_id,
             plan_item_id: itemId,
             metadata: { task_category: item?.category || null },
@@ -1566,6 +1614,7 @@
         } else if (action === 'skip-execution') {
           void reportTestEvent({
             event_type: 'task_skipped',
+            action_id: actionId,
             plan_id: plan.plan_id,
             plan_item_id: itemId,
             reason_code: promptReasonCode('skip'),
@@ -1653,6 +1702,7 @@
     if (action === 'save-feedback') {
       const plan = state.plan;
       if (!plan || !state.feedbackItemId || !state.feedbackRating) return;
+      const actionId = createTestActionId('feedback_submitted');
       await runTask(async () => {
         const feedback = await api.saveFeedback(plan.plan_id, state.feedbackItemId, {
           rating: state.feedbackRating,
@@ -1662,6 +1712,7 @@
         void reportTestFeedback(state.feedbackItemId, state.feedbackRating, feedbackComment);
         void reportTestEvent({
           event_type: 'feedback_submitted',
+          action_id: actionId,
           plan_id: plan.plan_id,
           plan_item_id: state.feedbackItemId,
           metadata: { reasons: state.feedbackReasons, has_comment: Boolean(feedbackComment) },
@@ -1706,6 +1757,7 @@
     if (action === 'replace-plan-item') {
       const plan = state.plan;
       if (!plan) return;
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
         const item = plan.items.find((entry) => entry.id === control.dataset.itemId);
         state.plan = await api.replacePlanItem(plan.plan_id, control.dataset.itemId, {
@@ -1714,6 +1766,7 @@
         });
         void reportTestEvent({
           event_type: 'task_replaced',
+          action_id: actionId,
           plan_id: plan.plan_id,
           plan_item_id: control.dataset.itemId,
           reason_code: promptReasonCode('replace'),
@@ -1726,6 +1779,7 @@
     if (action === 'adjust-plan-item') {
       const plan = state.plan;
       if (!plan) return;
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
         try {
           state.plan = await api.adjustPlanItem(plan.plan_id, control.dataset.itemId, {
@@ -1735,9 +1789,10 @@
           });
           void reportTestEvent({
             event_type: 'task_replaced',
+            action_id: actionId,
             plan_id: plan.plan_id,
             plan_item_id: control.dataset.itemId,
-            reason_code: control.dataset.adjustment === 'easier' ? 'low_energy' : 'other',
+            reason_code: reasonCodeForAdjustment(control.dataset.adjustment),
           });
           showToast('已按你的偏好换成新任务');
         } catch (error) {
@@ -1751,6 +1806,7 @@
       return;
     }
     if (action === 'adjust-recommendation-task') {
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
         try {
           const result = await api.adjustRecommendationTask(control.dataset.itemId, {
@@ -1767,8 +1823,9 @@
           }
           void reportTestEvent({
             event_type: 'task_replaced',
+            action_id: actionId,
             plan_id: state.plan?.plan_id || null,
-            reason_code: control.dataset.adjustment === 'easier' ? 'low_energy' : 'other',
+            reason_code: reasonCodeForAdjustment(control.dataset.adjustment),
             metadata: { adjustment: control.dataset.adjustment },
           });
           showToast('已按你的偏好换成新推荐');
@@ -1798,6 +1855,7 @@
     if (action === 'skip-plan-item') {
       const plan = state.plan;
       if (!plan) return;
+      const actionId = createTestActionId('task_skipped');
       await runTask(async () => {
         const item = plan.items.find((entry) => entry.id === control.dataset.itemId);
         state.plan = await api.skipPlanItem(plan.plan_id, control.dataset.itemId, {
@@ -1805,6 +1863,7 @@
         });
         void reportTestEvent({
           event_type: 'task_skipped',
+          action_id: actionId,
           plan_id: plan.plan_id,
           plan_item_id: control.dataset.itemId,
           reason_code: promptReasonCode('skip'),
@@ -1885,10 +1944,13 @@
         energy_level: state.quickDraft.energy_level,
         user_id: state.userId,
       }, state.quickSessionId);
-      void reportTestEvent({
-        event_type: 'recommendations_viewed',
-        session_id: state.quickSessionId,
-        metadata: { mode: 'quick', task_count: 1 + (state.quickRun?.alternatives?.length || 0) },
+      reportRecommendationsViewed({
+        sessionId: state.quickSessionId,
+        mode: 'quick',
+        items: [
+          state.quickRun?.primary_task,
+          ...(Array.isArray(state.quickRun?.alternatives) ? state.quickRun.alternatives : []),
+        ],
       });
       state.quickRestSelected = false;
       state.quickShowMore = false;

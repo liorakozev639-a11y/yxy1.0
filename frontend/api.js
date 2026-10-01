@@ -47,6 +47,52 @@
     }
   }
 
+  function createTestTelemetry({
+    getAnonymousId,
+    getSessionId,
+    recordEvent,
+    logger = typeof console !== 'undefined' ? console : null,
+  } = {}) {
+    if (typeof getAnonymousId !== 'function') throw new Error('getAnonymousId 必须是函数');
+    if (typeof recordEvent !== 'function') throw new Error('recordEvent 必须是函数');
+    let sequence = 0;
+
+    function logFailure(error) {
+      if (logger && typeof logger.debug === 'function') {
+        logger.debug('test telemetry event failed', error?.code || error?.message || error);
+      }
+    }
+
+    function idempotencyKey(event) {
+      if (event.idempotency_key) return event.idempotency_key;
+      if (event.action_id) return `telemetry:${event.event_type}:${event.action_id}`;
+      sequence += 1;
+      return `telemetry:${event.event_type}:${Date.now().toString(36)}:${sequence}:${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    function report(event) {
+      try {
+        const { action_id: _actionId, ...rest } = event;
+        const payload = {
+          ...rest,
+          anonymous_id: getAnonymousId(),
+          session_id: event.session_id ?? (typeof getSessionId === 'function' ? getSessionId() : null),
+          metadata: event.metadata || {},
+          idempotency_key: idempotencyKey(event),
+        };
+        return Promise.resolve(recordEvent(payload)).catch((error) => {
+          logFailure(error);
+          return { recorded: false };
+        });
+      } catch (error) {
+        logFailure(error);
+        return Promise.resolve({ recorded: false });
+      }
+    }
+
+    return { report };
+  }
+
   function createApi({ fetchImpl, storage, baseUrl = DEFAULT_BASE_URL } = {}) {
     if (typeof fetchImpl !== 'function') throw new Error('fetchImpl 必须是函数');
     if (!storage) throw new Error('storage 不能为空');
@@ -514,6 +560,7 @@
     TEST_ANONYMOUS_ID_KEY,
     USER_STORAGE_KEY,
     QUICK_STORAGE_KEY,
+    createTestTelemetry,
     createApi,
   };
 }));

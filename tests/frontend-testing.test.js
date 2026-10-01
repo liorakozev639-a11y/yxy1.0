@@ -6,6 +6,7 @@ const test = require('node:test');
 const {
   ADMIN_TOKEN_STORAGE_KEY,
   TEST_ANONYMOUS_ID_KEY,
+  createTestTelemetry,
   createApi,
 } = require('../frontend/api.js');
 
@@ -121,6 +122,69 @@ test('frontend wires success-only telemetry and swallows telemetry failures', ()
   }
   assert.match(app, /saveTestFeedback/);
   assert.match(app, /reason_code/);
+});
+
+test('telemetry payloads get unique action keys while retries can reuse an explicit key', async () => {
+  const payloads = [];
+  const telemetry = createTestTelemetry({
+    getAnonymousId: () => 'student_003',
+    getSessionId: () => 'sess_3',
+    recordEvent: async (payload) => {
+      payloads.push(payload);
+      return { recorded: true };
+    },
+  });
+
+  await telemetry.report({
+    event_type: 'task_replaced',
+    plan_id: 'plan_3',
+    plan_item_id: 'item_3',
+    metadata: { task_category: '自我成长' },
+  });
+  await telemetry.report({
+    event_type: 'task_replaced',
+    plan_id: 'plan_3',
+    plan_item_id: 'item_3',
+    metadata: { task_category: '自我成长' },
+  });
+  await telemetry.report({
+    event_type: 'task_skipped',
+    action_id: 'user-action-7',
+    reason_code: 'not_enough_time',
+  });
+  await telemetry.report({
+    event_type: 'task_skipped',
+    action_id: 'user-action-7',
+    reason_code: 'not_enough_time',
+  });
+
+  assert.notEqual(payloads[0].idempotency_key, payloads[1].idempotency_key);
+  assert.equal(payloads[0].metadata.task_category, '自我成长');
+  assert.equal(payloads[2].idempotency_key, payloads[3].idempotency_key);
+  assert.equal('action_id' in payloads[2], false);
+});
+
+test('recommendation hooks include category metadata and quick mode reports flow errors safely', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+  assert.match(app, /function reportRecommendationsViewed\(/);
+  assert.match(app, /task_category: item\.category/);
+  assert.match(app, /mode: 'quick',[\s\S]*?task_category: item\.category/);
+  assert.match(app, /async function runQuickTask\([\s\S]*?event_type: 'flow_error'/);
+  assert.match(app, /runQuickTask\([\s\S]*?reportTestEvent\([\s\S]*?flow_error/);
+});
+
+test('all recommendation adjustment actions map to allowed reason codes', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'app.js'), 'utf8');
+  for (const [adjustment, reason] of [
+    ['easier', 'low_energy'],
+    ['shorter', 'not_enough_time'],
+    ['cheaper', 'over_budget'],
+    ['nearer', 'location_inconvenient'],
+    ['less_social', 'not_matching_current_state'],
+    ['more_growth', 'not_matching_current_state'],
+  ]) {
+    assert.match(app, new RegExp(`${adjustment}: '${reason}'`));
+  }
 });
 
 test('admin dashboard is isolated and requests all required metric views', () => {
