@@ -526,6 +526,49 @@ class AdminMetricsServiceTests(unittest.TestCase):
         self.assertTrue(any("admin_metrics:reason_details" in statement for statement in statements))
         self.assertTrue(any("admin_metrics:user_detail" in statement for statement in statements))
 
+    def test_user_detail_task_category_scopes_feedback_by_latest_event_category(self) -> None:
+        self.service.user_detail(MetricsFilters(task_category="study"))
+
+        statement, params = next(
+            (statement, params)
+            for statement, params in self.connection.executions
+            if "admin_metrics:user_detail" in statement
+        )
+        self.assertIn("category_by_plan_item AS", statement)
+        self.assertIn("DISTINCT ON (e.plan_item_id)", statement)
+        self.assertIn("JOIN category_by_plan_item", statement)
+        self.assertIn("ON category_by_plan_item.plan_item_id = f.plan_item_id", statement)
+        self.assertIn("category_by_plan_item.task_category = %s", statement)
+        self.assertIn("study", params)
+
+    def test_energy_and_user_detail_responses_have_stable_row_caps(self) -> None:
+        energy_row = deepcopy(self.connection.metric_rows["energy_recommendations"][0])
+        user_row = deepcopy(self.connection.metric_rows["user_detail"][0])
+        cases = (
+            (
+                "energy_recommendations",
+                self.service.energy_recommendations,
+                "MAX_ENERGY_RECOMMENDATION_ROWS",
+                energy_row,
+            ),
+            ("user_detail", self.service.user_detail, "MAX_USER_DETAIL_ROWS", user_row),
+        )
+
+        for metric_name, method, cap_name, row in cases:
+            with self.subTest(metric_name=metric_name):
+                cap = getattr(self.service, cap_name)
+                self.connection.metric_rows[metric_name] = [deepcopy(row) for _ in range(cap + 3)]
+
+                result = method(MetricsFilters())
+
+                self.assertEqual(len(result), cap)
+                statement = next(
+                    statement
+                    for statement, _ in self.connection.executions
+                    if f"admin_metrics:{metric_name}" in statement
+                )
+                self.assertIn(f"LIMIT {cap}", statement)
+
 
 if __name__ == "__main__":
     unittest.main()

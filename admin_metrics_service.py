@@ -70,6 +70,8 @@ class AdminMetricsService:
     SESSION_TTL = timedelta(hours=1)
     LOCKOUT_TTL = timedelta(minutes=15)
     MAX_FAILED_LOGINS = 5
+    MAX_ENERGY_RECOMMENDATION_ROWS = 100
+    MAX_USER_DETAIL_ROWS = 500
 
     def __init__(self, database_url: str) -> None:
         if not database_url:
@@ -522,6 +524,7 @@ class AdminMetricsService:
             WHERE e.energy_level IS NOT NULL
             GROUP BY e.energy_level, e.task_category
             ORDER BY e.energy_level ASC, e.task_category ASC
+            LIMIT {self.MAX_ENERGY_RECOMMENDATION_ROWS}
         """
         with self._connect() as connection:
             rows = connection.execute(statement, params + feedback_params).fetchall()
@@ -534,7 +537,7 @@ class AdminMetricsService:
                 "replacement_rate": self._rate(row["replacement_count"], row["recommendation_count"]),
                 "skip_rate": self._rate(row["skip_count"], row["recommendation_count"]),
             }
-            for row in rows
+            for row in rows[: self.MAX_ENERGY_RECOMMENDATION_ROWS]
         ]
 
     def reasons(self, filters: MetricsFilters) -> list[dict[str, Any]]:
@@ -604,6 +607,31 @@ class AdminMetricsService:
         """Return anonymous per-user behavior totals for an optional anonymous_id filter."""
         where, params = self._event_where(filters)
         feedback_where, feedback_params = self._feedback_where(filters)
+        category_cte = ""
+        feedback_category_join = ""
+        feedback_category_where = ""
+        feedback_category_params: tuple[object, ...] = ()
+        if filters.task_category:
+            category_cte = """
+            category_by_plan_item AS (
+                SELECT DISTINCT ON (e.plan_item_id)
+                    e.plan_item_id,
+                    e.metadata_json ->> 'task_category' AS task_category
+                FROM test_events e
+                WHERE e.plan_item_id IS NOT NULL
+                  AND e.metadata_json ? 'task_category'
+                ORDER BY e.plan_item_id, e.occurred_at DESC, e.id DESC
+            ),
+            """
+            feedback_category_join = """
+                JOIN category_by_plan_item
+                    ON category_by_plan_item.plan_item_id = f.plan_item_id
+            """
+            feedback_category_where = (
+                f"{'AND' if feedback_where else 'WHERE'} "
+                "category_by_plan_item.task_category = %s"
+            )
+            feedback_category_params = (filters.task_category,)
         user_clauses: list[str] = []
         user_params: list[object] = []
         if filters.cohort:
@@ -622,7 +650,7 @@ class AdminMetricsService:
         user_where = " WHERE " + " AND ".join(user_clauses) if user_clauses else ""
         statement = f"""
             /* admin_metrics:user_detail */
-            WITH scoped_events AS (
+            WITH {category_cte}scoped_events AS (
                 SELECT e.anonymous_id, e.session_id, e.event_type
                 FROM test_events e
                 JOIN test_users u ON u.anonymous_id = e.anonymous_id
@@ -631,7 +659,9 @@ class AdminMetricsService:
                 SELECT f.anonymous_id, f.rating
                 FROM task_test_feedback f
                 JOIN test_users u ON u.anonymous_id = f.anonymous_id
+                {feedback_category_join}
                 {feedback_where}
+                {feedback_category_where}
             )
             SELECT
                 u.anonymous_id,
@@ -647,9 +677,13 @@ class AdminMetricsService:
             {user_where}
             GROUP BY u.anonymous_id, u.cohort
             ORDER BY u.anonymous_id ASC
+            LIMIT {self.MAX_USER_DETAIL_ROWS}
         """
         with self._connect() as connection:
-            rows = connection.execute(statement, params + feedback_params + tuple(user_params)).fetchall()
+            rows = connection.execute(
+                statement,
+                params + feedback_params + feedback_category_params + tuple(user_params),
+            ).fetchall()
         return [
             {
                 "anonymous_id": row["anonymous_id"],
@@ -661,5 +695,5 @@ class AdminMetricsService:
                 "replaced_count": int(row["replaced_count"] or 0),
                 "average_rating": round(float(row["average_rating"] or 0), 2),
             }
-            for row in rows
+            for row in rows[: self.MAX_USER_DETAIL_ROWS]
         ]

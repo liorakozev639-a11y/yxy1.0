@@ -2,9 +2,15 @@
   const exported = factory();
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) {
+    let storage = null;
+    try {
+      storage = root.localStorage;
+    } catch (_) {
+      // Storage access can throw in private or blocked browser contexts.
+    }
     const client = exported.createApi({
       fetchImpl: root.fetch.bind(root),
-      storage: root.localStorage,
+      storage,
       baseUrl: root.FREE_TIME_API_BASE_URL,
     });
     root.FreeTimeApi = { ...exported, ...client };
@@ -144,9 +150,18 @@
     });
   }
 
+  function createMemoryStorage() {
+    const values = new Map();
+    return {
+      getItem(key) { return values.has(key) ? values.get(key) : null; },
+      setItem(key, value) { values.set(key, String(value)); },
+      removeItem(key) { values.delete(key); },
+    };
+  }
+
   function createApi({ fetchImpl, storage, baseUrl = DEFAULT_BASE_URL } = {}) {
     if (typeof fetchImpl !== 'function') throw new Error('fetchImpl 必须是函数');
-    if (!storage) throw new Error('storage 不能为空');
+    storage = storage || createMemoryStorage();
     const apiBase = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
     let inMemoryTestAnonymousId = null;
 

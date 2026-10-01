@@ -101,11 +101,11 @@ http://127.0.0.1:5173/admin.html
 | `summary.skip_rate` | `task_skipped` 事件数 ÷ `recommendations_viewed` 事件数，百分比。 |
 | `funnel` | 按事件发生次数返回 `session_created`、`questionnaire_completed`、`recommendations_viewed`、`task_started`、`task_completed`、`feedback_submitted` 六个步骤；不会把每一步误当成去重用户数。 |
 | `recommendations` | 按 `task_category` 汇总推荐查看次数、评价平均分、替换率和跳过率。评价通过该计划项最近一次带分类的事件映射到分类；没有分类事件的评价归入 `unknown`。 |
-| `energy-recommendations` | 按事件 metadata 中的 `energy_level` 和 `task_category` 汇总推荐查看次数、评价平均分、替换率和跳过率；只使用已上报的精力值，不重新计算推荐结果。 |
+| `energy-recommendations` | 按事件 metadata 中的 `energy_level` 和 `task_category` 汇总推荐查看次数、评价平均分、替换率和跳过率；只使用已上报的精力值，不重新计算推荐结果；最多返回 100 个分类组合。 |
 | `reasons` | 所有带 `reason_code` 的跳过/替换事件按原因代码计数，并按数量降序展示。 |
 | `reason-details` | 返回最近 100 条带原因代码和非空 `reason_detail` 的匿名事件，文本服务端限制为 500 字并进行 HTML 转义；只展示匿名编号、原因代码、说明和时间。 |
 | `errors` | `flow_error` 事件 metadata 中的 `error_code` 计数，最多返回 100 个代码；缺少代码归为 `unknown`。 |
-| `user-detail` | 按 `anonymous_id`（可选）返回匿名编号、批次、事件/会话/完成/跳过/替换计数和平均评分；不返回姓名、联系方式或其他个人身份字段。 |
+| `user-detail` | 按 `anonymous_id`（可选）返回匿名编号、批次、事件/会话/完成/跳过/替换计数和平均评分；最多返回 500 个匿名用户；不返回姓名、联系方式或其他个人身份字段。 |
 
 日期、`cohort` 和 `anonymous_id` 会作用于相应事件或评价记录；`task_category` 会筛选带分类的事件，并对评价使用计划项的分类映射。指标是匿名聚合数据，不能反推出完成率等于独立用户数。
 

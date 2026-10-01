@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const { STORAGE_KEY, USER_STORAGE_KEY, createApi } = require('../frontend/api.js');
 
@@ -20,6 +23,28 @@ function jsonResponse(data, status = 200) {
     async json() { return data; },
   };
 }
+
+test('module initialization tolerates a localStorage getter that throws', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'api.js'), 'utf8');
+  let localStorageReads = 0;
+  const window = {
+    fetch: async () => jsonResponse({ data: {}, error: null }),
+    location: { hostname: '127.0.0.1', protocol: 'http:', origin: 'http://127.0.0.1' },
+  };
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    get() {
+      localStorageReads += 1;
+      throw new Error('storage access blocked');
+    },
+  });
+
+  vm.runInNewContext(source, { window });
+
+  const anonymousId = window.FreeTimeApi.getTestAnonymousId();
+  assert.match(anonymousId, /^student_\d{6}$/);
+  assert.equal(localStorageReads, 1);
+});
 
 test('createSession stores only the session id and sends no authorization', async () => {
   const calls = [];
