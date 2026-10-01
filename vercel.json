@@ -12,6 +12,10 @@
   ],
   "routes": [
     {
+      "src": "/admin\\.html",
+      "dest": "/frontend/admin.html"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.py"
     },

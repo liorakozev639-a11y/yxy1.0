@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>留白计划 · 测试指标</title>
+    <link rel="stylesheet" href="admin.css?v=metrics-v1">
+  </head>
+  <body class="admin-body">
+    <main class="admin-shell">
+      <header class="admin-header">
+        <div>
+          <p class="eyebrow">留白计划 / 测试观测</p>
+          <h1>推荐效果与流程指标</h1>
+          <p class="muted">仅展示匿名聚合数据，不展示姓名、邮箱或其他个人身份信息。</p>
+        </div>
+        <button id="admin-logout" class="button secondary" type="button" hidden>退出</button>
+      </header>
+
+      <section id="admin-login" class="panel login-panel" aria-labelledby="login-title">
+        <h2 id="login-title">管理员登录</h2>
+        <form id="admin-login-form">
+          <label>账号<input name="username" autocomplete="username" required></label>
+          <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+          <button class="button primary" type="submit">登录</button>
+        </form>
+        <p id="admin-login-error" class="error" role="alert"></p>
+      </section>
+
+      <section id="admin-dashboard" hidden>
+        <form id="admin-filters" class="panel filters" autocomplete="off">
+          <label>开始日期<input name="from" type="date"></label>
+          <label>结束日期<input name="to" type="date"></label>
+          <label>测试批次<input name="cohort" maxlength="64" placeholder="student_2026_09"></label>
+          <label>匿名编号<input name="anonymous_id" maxlength="64" placeholder="student_001"></label>
+          <label>任务分类<input name="task_category" maxlength="64"></label>
+          <button class="button primary" type="submit">刷新指标</button>
+        </form>
+
+        <p id="admin-error" class="error" role="alert"></p>
+        <div id="summary" class="metric-grid"></div>
+        <div class="dashboard-grid">
+          <section class="panel"><h2>流程漏斗</h2><div id="funnel"></div></section>
+          <section class="panel"><h2>推荐效果</h2><div id="recommendations"></div></section>
+          <section class="panel"><h2>跳过与替换原因</h2><div id="reasons"></div></section>
+          <section class="panel"><h2>流程错误</h2><div id="errors"></div></section>
+        </div>
+      </section>
+    </main>
+    <script src="api.js?v=metrics-v1"></script>
+    <script src="admin.js?v=metrics-v1"></script>
+  </body>
+</html>

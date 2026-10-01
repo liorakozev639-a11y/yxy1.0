@@ -747,6 +747,7 @@ body.pixel-body {
 .feedback-star { width: 30px; height: 30px; }
 .feedback-star.is-selected, .feedback-reason.is-selected { background: var(--pixel-yellow); box-shadow: 2px 2px 0 var(--pixel-line); }
 .feedback-reason { padding: 5px 8px; font-size: 12px; }
+.feedback-comment { width: 100%; min-height: 64px; padding: 8px; border: 2px solid var(--pixel-line); border-radius: 0; background: var(--pixel-paper); color: var(--pixel-ink); resize: vertical; }
 .pixel-feedback-panel .button { margin-left: auto; }
 .recommendation-memory-note,
 .execution-reminder,

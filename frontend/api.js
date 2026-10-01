@@ -13,6 +13,8 @@
   const STORAGE_KEY = 'free_time_agent_session_id';
   const USER_STORAGE_KEY = 'free_time_agent_user_id';
   const QUICK_STORAGE_KEY = 'free_time_agent_quick_session_id';
+  const TEST_ANONYMOUS_ID_KEY = 'mvp_test_anonymous_id';
+  const ADMIN_TOKEN_STORAGE_KEY = 'mvp_admin_metrics_token';
 
   function isLocalHostname(hostname) {
     return hostname === 'localhost'
@@ -50,8 +52,8 @@
     if (!storage) throw new Error('storage 不能为空');
     const apiBase = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
 
-    async function request(path, { method = 'GET', body } = {}) {
-      const headers = {};
+    async function request(path, { method = 'GET', body, headers: extraHeaders = {} } = {}) {
+      const headers = { ...extraHeaders };
       if (body !== undefined) headers['Content-Type'] = 'application/json';
       let response;
       try {
@@ -102,6 +104,18 @@
 
     function currentUserId() {
       return storage.getItem(USER_STORAGE_KEY);
+    }
+
+    function getTestAnonymousId() {
+      try {
+        const existing = storage.getItem(TEST_ANONYMOUS_ID_KEY);
+        if (existing) return existing;
+        const generated = `student_${String(Math.floor(100000 + Math.random() * 900000))}`;
+        storage.setItem(TEST_ANONYMOUS_ID_KEY, generated);
+        return generated;
+      } catch (_) {
+        return 'student_000000';
+      }
     }
 
     async function ensureAnonymousUser() {
@@ -362,6 +376,66 @@
       return request(`/api/v1/plans/${planId}/feedback`);
     }
 
+    function identifyTestUser(anonymousId, cohort) {
+      return request('/api/v1/test-users/identify', {
+        method: 'POST',
+        body: { anonymous_id: anonymousId, cohort },
+      });
+    }
+
+    function recordTestEvent(event) {
+      return request('/api/v1/test-events', {
+        method: 'POST',
+        body: event,
+      });
+    }
+
+    function saveTestFeedback(feedback) {
+      return request('/api/v1/test-feedback', {
+        method: 'POST',
+        body: feedback,
+      });
+    }
+
+    function getAdminToken() {
+      return storage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+    }
+
+    async function adminLogin(username, password) {
+      const data = await request('/api/v1/admin/login', {
+        method: 'POST',
+        body: { username, password },
+      });
+      if (data && data.token) storage.setItem(ADMIN_TOKEN_STORAGE_KEY, data.token);
+      return data;
+    }
+
+    async function adminLogout() {
+      const token = getAdminToken();
+      if (!token) return { logged_out: false };
+      try {
+        return await request('/api/v1/admin/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } finally {
+        storage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+      }
+    }
+
+    function adminMetrics(path, filters = {}) {
+      const endpoint = String(path || '').replace(/^\/+/, '');
+      const query = new URLSearchParams();
+      Object.entries(filters || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') query.set(key, value);
+      });
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      const token = getAdminToken();
+      return request(`/api/v1/admin/metrics/${endpoint}${suffix}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    }
+
     async function clearSession(sessionId) {
       const current = requireSessionId(sessionId);
       const data = await request(`/api/v1/sessions/${current}/data`, {
@@ -402,7 +476,15 @@
       getSessionId,
       getQuickSessionId,
       getLatestQuickRecommendations,
+      getAdminToken,
+      getTestAnonymousId,
       generatePlan,
+      identifyTestUser,
+      recordTestEvent,
+      saveTestFeedback,
+      adminLogin,
+      adminLogout,
+      adminMetrics,
       restoreSession,
       replacePlanItem,
       replacePlanItemEasier,
@@ -424,5 +506,14 @@
     };
   }
 
-  return { ApiError, DEFAULT_BASE_URL, STORAGE_KEY, USER_STORAGE_KEY, QUICK_STORAGE_KEY, createApi };
+  return {
+    ADMIN_TOKEN_STORAGE_KEY,
+    ApiError,
+    DEFAULT_BASE_URL,
+    STORAGE_KEY,
+    TEST_ANONYMOUS_ID_KEY,
+    USER_STORAGE_KEY,
+    QUICK_STORAGE_KEY,
+    createApi,
+  };
 }));

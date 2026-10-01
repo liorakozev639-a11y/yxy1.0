@@ -6,6 +6,8 @@
   const PRODUCT_MODE_KEY = 'free_time_agent_product_mode';
   const QUICK_DRAFT_KEY = 'free_time_agent_quick_draft';
   const QUICK_SELECTED_KEY = 'free_time_agent_quick_selected_task';
+  const TEST_ANONYMOUS_ID_KEY = 'mvp_test_anonymous_id';
+  const TEST_COHORT = window.FREE_TIME_TEST_COHORT || 'student_2026_09';
   const categories = [
     { id: 'energy', name: '活力充电', description: '运动、走动与身体恢复', icon: 'activity' },
     { id: 'calm', name: '松弛疗愈', description: '减压、休息与情绪恢复', icon: 'wind' },
@@ -67,6 +69,7 @@
     feedbackItemId: null,
     feedbackRating: null,
     feedbackReasons: [],
+    feedbackComment: '',
     executionReminders: null,
     review: null,
     showingReview: false,
@@ -87,6 +90,91 @@
     return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
     }[character]));
+  }
+
+  function ensureTestAnonymousId() {
+    if (typeof api.getTestAnonymousId === 'function') return api.getTestAnonymousId();
+    try {
+      const existing = window.localStorage.getItem(TEST_ANONYMOUS_ID_KEY);
+      if (existing) return existing;
+      const generated = `student_${String(Math.floor(100000 + Math.random() * 900000))}`;
+      window.localStorage.setItem(TEST_ANONYMOUS_ID_KEY, generated);
+      return generated;
+    } catch (_) {
+      return 'student_000000';
+    }
+  }
+
+  function telemetryId(event) {
+    return [
+      event.event_type,
+      event.session_id || state.sessionId || 'none',
+      event.plan_id || state.plan?.plan_id || 'none',
+      event.plan_item_id || 'none',
+    ].join(':');
+  }
+
+  function reportTestEvent(event) {
+    try {
+      const payload = {
+        ...event,
+        anonymous_id: ensureTestAnonymousId(),
+        session_id: event.session_id ?? state.sessionId ?? null,
+        metadata: event.metadata || {},
+        idempotency_key: event.idempotency_key || telemetryId(event),
+      };
+      return Promise.resolve(api.recordTestEvent(payload)).catch((error) => {
+        console.debug('test telemetry event failed', error?.code || error?.message || error);
+        return { recorded: false };
+      });
+    } catch (error) {
+      console.debug('test telemetry event failed', error?.code || error?.message || error);
+      return Promise.resolve({ recorded: false });
+    }
+  }
+
+  function reportTestFeedback(itemId, rating, comment) {
+    try {
+      const feedback = {
+        anonymous_id: ensureTestAnonymousId(),
+        session_id: state.sessionId,
+        plan_item_id: itemId,
+        rating,
+        comment: comment || null,
+      };
+      return Promise.resolve(api.saveTestFeedback(feedback)).catch((error) => {
+        console.debug('test telemetry feedback failed', error?.code || error?.message || error);
+        return { recorded: false };
+      });
+    } catch (error) {
+      console.debug('test telemetry feedback failed', error?.code || error?.message || error);
+      return Promise.resolve({ recorded: false });
+    }
+  }
+
+  async function identifyTestUser() {
+    const anonymousId = ensureTestAnonymousId();
+    try {
+      await api.identifyTestUser(anonymousId, TEST_COHORT);
+    } catch (error) {
+      console.debug('test telemetry identity failed', error?.code || error?.message || error);
+    }
+    return anonymousId;
+  }
+
+  function promptReasonCode(action) {
+    const prompt = action === 'skip' ? '跳过原因（可填代码，如 low_energy）' : '替换原因（可填代码，如 not_interested）';
+    let value = 'other';
+    try {
+      value = typeof window.prompt === 'function' ? window.prompt(prompt, 'other') : 'other';
+    } catch (_) {
+      value = 'other';
+    }
+    const allowed = new Set([
+      'not_interested', 'low_energy', 'not_enough_time', 'over_budget',
+      'location_inconvenient', 'too_difficult', 'not_matching_current_state', 'other',
+    ]);
+    return allowed.has(value) ? value : 'other';
   }
 
   function recommendationStorageKey() {
@@ -488,6 +576,7 @@
       <span class="feedback-label">${prompt}</span>
       <div class="feedback-rating">${[1, 2, 3, 4, 5].map((rating) => `<button class="feedback-star ${state.feedbackRating === rating ? 'is-selected' : ''}" data-action="choose-feedback-rating" data-rating="${rating}" aria-label="${rating} 分">${rating}</button>`).join('')}</div>
       <div class="feedback-reasons">${reasons.map((reason) => `<button class="feedback-reason ${state.feedbackReasons.includes(reason) ? 'is-selected' : ''}" data-action="toggle-feedback-reason" data-reason="${reason}">${reason}</button>`).join('')}</div>
+      <textarea class="feedback-comment" data-feedback-comment maxlength="500" placeholder="补充一句体验（可选）">${escapeHtml(state.feedbackComment)}</textarea>
       <button class="button primary compact" data-action="save-feedback" ${state.feedbackRating ? '' : 'disabled'}>保存反馈</button>
     </div>`;
   }
@@ -889,6 +978,7 @@
     state.detailItemId = null;
     state.feedbackRating = null;
     state.feedbackReasons = [];
+    state.feedbackComment = '';
     state.executionReminders = null;
     state.review = null;
     state.showingReview = false;
@@ -946,6 +1036,11 @@
     resetLocalState();
     state.sessionId = created.session_id;
     state.step = 'welcome';
+    void reportTestEvent({
+      event_type: 'session_created',
+      session_id: state.sessionId,
+      idempotency_key: `session_created:${state.sessionId}`,
+    });
   }
 
   async function recoverExpiredSession() {
@@ -974,6 +1069,10 @@
         state.error = error.message || '请求失败，请稍后重试';
         state.planRecoveryOptions = flow.planFailureRecoveryOptions(error.details);
         state.retryTask = task;
+        void reportTestEvent({
+          event_type: 'flow_error',
+          metadata: { error_code: error.code || 'request_failed', status: error.status || 0 },
+        });
       }
     } finally {
       state.busy = false;
@@ -1039,6 +1138,7 @@
     state.step = 'booting';
     state.busy = true;
     state.error = '';
+    void identifyTestUser();
     render();
     try {
       await api.getHealth();
@@ -1067,6 +1167,11 @@
       }
       const restored = await api.restoreSession(storedSessionId);
       state.sessionId = restored.session_id;
+      void reportTestEvent({
+        event_type: 'session_created',
+        session_id: state.sessionId,
+        idempotency_key: `session_created:${state.sessionId}`,
+      });
       state.recommendation = restoreRecommendation();
       hydratePreferences(restored.preferences || {});
       const initialDestination = flow.resumeDestination({
@@ -1098,6 +1203,10 @@
         const started = await api.startQuestionnaire(progress.mode);
         hydrateQuestionnaire(started, progress);
         state.step = 'quiz';
+        void reportTestEvent({
+          event_type: 'questionnaire_started',
+          metadata: { mode: progress.mode },
+        });
       } catch (error) {
         if (error.status !== 409) throw error;
         state.step = 'mode';
@@ -1192,6 +1301,11 @@
     state.recommendation = generated.recommendation || null;
     persistRecommendation(state.recommendation);
     state.step = 'result';
+    void reportTestEvent({
+      event_type: 'recommendations_viewed',
+      plan_id: state.plan?.plan_id || null,
+      metadata: { task_count: Array.isArray(state.plan?.items) ? state.plan.items.length : 0 },
+    });
   }
 
   async function applyPlanRecovery(option) {
@@ -1332,6 +1446,10 @@
         const started = await api.startQuestionnaire(control.dataset.mode);
         hydrateQuestionnaire(started, null);
         state.step = 'quiz';
+        void reportTestEvent({
+          event_type: 'questionnaire_started',
+          metadata: { mode: control.dataset.mode },
+        });
       });
       return;
     }
@@ -1358,6 +1476,7 @@
         state.result = await api.submitQuestionnaire();
         state.profileInsight = await api.getProfileInsight();
         state.step = 'insight';
+        void reportTestEvent({ event_type: 'questionnaire_completed' });
       });
       return;
     }
@@ -1391,6 +1510,13 @@
         }
         const payload = await api.startExecution(plan.plan_id, state.energyItemId, { user_id: state.userId });
         applyExecutionPayload(payload);
+        const item = plan.items.find((entry) => entry.id === state.energyItemId);
+        void reportTestEvent({
+          event_type: 'task_started',
+          plan_id: plan.plan_id,
+          plan_item_id: state.energyItemId,
+          metadata: { task_category: item?.category || null },
+        });
         state.energyItemId = null;
         state.energyChoice = null;
         showToast('任务已开始');
@@ -1404,6 +1530,12 @@
         state.plan = await api.replacePlanItemEasier(plan.plan_id, state.energyItemId, {
           expected_version: plan.version,
           user_id: state.userId,
+        });
+        void reportTestEvent({
+          event_type: 'task_replaced',
+          plan_id: plan.plan_id,
+          plan_item_id: state.energyItemId,
+          reason_code: 'low_energy',
         });
         state.energyItemId = null;
         state.energyChoice = null;
@@ -1423,6 +1555,23 @@
             ? await api.skipExecution(plan.plan_id, itemId, { user_id: state.userId })
             : await api.checkExecutionDeadline(plan.plan_id, itemId, { user_id: state.userId });
         applyExecutionPayload(payload);
+        const item = plan.items.find((entry) => entry.id === itemId);
+        if (action === 'complete-execution') {
+          void reportTestEvent({
+            event_type: 'task_completed',
+            plan_id: plan.plan_id,
+            plan_item_id: itemId,
+            metadata: { task_category: item?.category || null },
+          });
+        } else if (action === 'skip-execution') {
+          void reportTestEvent({
+            event_type: 'task_skipped',
+            plan_id: plan.plan_id,
+            plan_item_id: itemId,
+            reason_code: promptReasonCode('skip'),
+            metadata: { task_category: item?.category || null },
+          });
+        }
         showToast(action === 'complete-execution' ? '任务已完成' : action === 'skip-execution' ? '任务已跳过，稍后可重新排程' : '已检查任务截止时间');
       });
       return;
@@ -1509,6 +1658,14 @@
           rating: state.feedbackRating,
           reasons: state.feedbackReasons,
         });
+        const feedbackComment = state.feedbackComment.trim();
+        void reportTestFeedback(state.feedbackItemId, state.feedbackRating, feedbackComment);
+        void reportTestEvent({
+          event_type: 'feedback_submitted',
+          plan_id: plan.plan_id,
+          plan_item_id: state.feedbackItemId,
+          metadata: { reasons: state.feedbackReasons, has_comment: Boolean(feedbackComment) },
+        });
         if (feedback.recommendation_memory) {
           state.plan = {
             ...state.plan,
@@ -1518,6 +1675,7 @@
         state.feedbackItemId = null;
         state.feedbackRating = null;
         state.feedbackReasons = [];
+        state.feedbackComment = '';
         showToast('反馈已保存');
       });
       return;
@@ -1536,6 +1694,12 @@
           start_at: new Date(startInput).toISOString(),
           end_at: new Date(endInput).toISOString(),
         });
+        void reportTestEvent({
+          event_type: 'schedule_adjusted',
+          plan_id: plan.plan_id,
+          plan_item_id: item.id,
+          metadata: { task_category: item.category || null },
+        });
       });
       return;
     }
@@ -1543,9 +1707,17 @@
       const plan = state.plan;
       if (!plan) return;
       await runTask(async () => {
+        const item = plan.items.find((entry) => entry.id === control.dataset.itemId);
         state.plan = await api.replacePlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
           user_id: state.userId,
+        });
+        void reportTestEvent({
+          event_type: 'task_replaced',
+          plan_id: plan.plan_id,
+          plan_item_id: control.dataset.itemId,
+          reason_code: promptReasonCode('replace'),
+          metadata: { task_category: item?.category || null },
         });
         showToast('已更换任务');
       });
@@ -1560,6 +1732,12 @@
             expected_version: plan.version,
             adjustment: control.dataset.adjustment,
             user_id: state.userId,
+          });
+          void reportTestEvent({
+            event_type: 'task_replaced',
+            plan_id: plan.plan_id,
+            plan_item_id: control.dataset.itemId,
+            reason_code: control.dataset.adjustment === 'easier' ? 'low_energy' : 'other',
           });
           showToast('已按你的偏好换成新任务');
         } catch (error) {
@@ -1587,6 +1765,12 @@
               recommendation_memory: result.recommendation_memory,
             };
           }
+          void reportTestEvent({
+            event_type: 'task_replaced',
+            plan_id: state.plan?.plan_id || null,
+            reason_code: control.dataset.adjustment === 'easier' ? 'low_energy' : 'other',
+            metadata: { adjustment: control.dataset.adjustment },
+          });
           showToast('已按你的偏好换成新推荐');
         } catch (error) {
           if (error.status === 409) {
@@ -1615,8 +1799,16 @@
       const plan = state.plan;
       if (!plan) return;
       await runTask(async () => {
+        const item = plan.items.find((entry) => entry.id === control.dataset.itemId);
         state.plan = await api.skipPlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
+        });
+        void reportTestEvent({
+          event_type: 'task_skipped',
+          plan_id: plan.plan_id,
+          plan_item_id: control.dataset.itemId,
+          reason_code: promptReasonCode('skip'),
+          metadata: { task_category: item?.category || null },
         });
       });
       return;
@@ -1682,12 +1874,22 @@
       if (!state.quickSessionId) {
         const session = await api.createQuickSession();
         state.quickSessionId = session.session_id;
+        void reportTestEvent({
+          event_type: 'session_created',
+          session_id: state.quickSessionId,
+          idempotency_key: `session_created:${state.quickSessionId}`,
+        });
       }
       state.quickRun = await api.createQuickRecommendations({
         available_minutes: minutes,
         energy_level: state.quickDraft.energy_level,
         user_id: state.userId,
       }, state.quickSessionId);
+      void reportTestEvent({
+        event_type: 'recommendations_viewed',
+        session_id: state.quickSessionId,
+        metadata: { mode: 'quick', task_count: 1 + (state.quickRun?.alternatives?.length || 0) },
+      });
       state.quickRestSelected = false;
       state.quickShowMore = false;
       window.localStorage.removeItem(QUICK_SELECTED_KEY);
@@ -1719,6 +1921,7 @@
       saveQuickDraft();
     }
     if (event.target.name === 'location') state.profile.location = event.target.value;
+    if (event.target.matches('[data-feedback-comment]')) state.feedbackComment = event.target.value;
   });
 
   window.addEventListener('beforeinstallprompt', (event) => {
