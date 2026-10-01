@@ -3,41 +3,50 @@
 ## Changed Files
 
 - `admin_metrics_service.py`
-  - Uses a transaction-scoped PostgreSQL advisory lock and the database's
-    single-admin uniqueness constraint while initializing the configured admin.
-  - Persists `failed_login_count` and `locked_until` through atomic updates,
-    so lockout applies across service instances and workers.
-  - Compares UTF-8 bytes in constant time, binds a `list` for funnel
-    `ANY(%s)`, and aggregates feedback independently of uneven event counts.
+  - Completes the database context normally before returning the uniform
+    `PermissionError`, so failed-login counters and lockouts commit instead of
+    rolling back.
+  - Retains the transaction-scoped advisory lock, one-admin constraint,
+    UTF-8 constant-time failure handling, and `ANY(%s)` list binding.
+  - Limits full-flow success to distinct `session_created` sessions in the
+    denominator and distinct `feedback_submitted` sessions in the numerator.
+  - Scopes summary and recommendation ratings by `task_test_feedback.created_at`
+    and de-duplicates feedback by plan item before averaging.
 - `migrations/002_user_testing_metrics.sql`
-  - Adds replay-safe `failed_login_count` and `locked_until` columns plus a
-    partial unique index that permits only one `admin` role row.
+  - Restored to the original Task 1 observability schema so that its already
+    published version remains stable.
+- `migrations/003_admin_security_upgrade.sql`
+  - Adds `failed_login_count`, `locked_until`, and the one-admin partial unique
+    index using replay-safe statements for both fresh databases and databases
+    that already recorded migration 002.
 - `tests/test_admin_metrics.py`
-  - Covers cross-instance lockout, non-ASCII username failure, advisory-lock
-    use, the funnel array parameter, and feedback aggregation with uneven
-    event counts.
+  - Models transaction commit and rollback at the psycopg boundary; covers
+    lockout in the original and a newly constructed service instance, feedback
+    date bounds, full-flow event types, uneven event counts, and empty metrics.
 - `tests/test_database_migrations.py`
-  - Covers the replay-safe administrator columns and uniqueness index.
+  - Covers the ordered 003 upgrade, original 002 contract, replay safety, and
+    applying 003 exactly once after version 002 is already recorded.
 
-## Commit
+## Commits
 
-- `f095882 fix: harden admin metrics service`
+- `47cef5b fix: correct admin metrics transactions and migrations`
 
 ## Verification
 
-- PASS: controlled psycopg boundary run of
-  `tests.test_admin_metrics` and `tests.test_database_migrations` (15 tests).
-- PASS: controlled psycopg boundary run of
-  `tests.test_test_observability` (9 Task 2 regression tests).
-- PASS: `py_compile` for the modified Python modules and tests.
-- PASS: `git diff --check` before commit.
+- PASS: controlled psycopg-boundary `tests.test_admin_metrics` (12 tests).
+- PASS: controlled psycopg/FastAPI-boundary `tests.test_database_migrations`
+  (7 tests) and Task 2 `tests.test_test_observability` regression (9 tests).
+- PASS: `py_compile` for Task 3 service, migration runner, Task 2 service, and
+  their tests.
+- PASS: `git diff --check` before the code-fix commit.
 
 ## Environment Limits
 
-- The system `python` launcher is unavailable, and the bundled Python runtime
-  does not include `psycopg`; tests used a minimal in-process psycopg boundary
-  stub, matching the test suite's controlled-connection design.
-- No real PostgreSQL instance is available. Before deployment, execute
-  `migrations/002_user_testing_metrics.sql` twice against a disposable
-  PostgreSQL database and run the metrics queries there to validate PostgreSQL
-  JSONB, advisory-lock, array-adaptation, aggregate, and timestamp semantics.
+- The available Python runtime does not include `psycopg` or `fastapi`, so the
+  controlled unit tests inject only the minimal module names needed to exercise
+  the repository's existing connection fakes. Direct test collection cannot
+  start without those dependencies.
+- No real PostgreSQL instance is available. The following remain unverified:
+  executing fresh 002 then 003, applying 003 after recorded 002, PostgreSQL's
+  partial unique-index behavior on pre-existing rows, advisory-lock behavior,
+  psycopg array adaptation, JSONB aggregation, and timestamp filtering.
