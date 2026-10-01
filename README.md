@@ -229,6 +229,13 @@ $env:SESSION_DATABASE_URL = `
   "postgresql://postgres:<password>@127.0.0.1:5433/free_time_agent"
 ```
 
+如需使用测试指标管理员看板，再设置以下变量。密码只写入当前终端或部署平台的密钥配置，不要写入代码、日志或提交：
+
+```powershell
+$env:ADMIN_METRICS_USERNAME = '<admin-username>'
+$env:ADMIN_METRICS_PASSWORD = '<strong-password>'
+```
+
 ## 4. 启动后端
 
 ```powershell
@@ -267,6 +274,14 @@ Set-Location "D:\yxy1.0"
 ```text
 http://127.0.0.1:5173/
 ```
+
+管理员看板地址：
+
+```text
+http://127.0.0.1:5173/admin.html
+```
+
+看板登录后只展示匿名聚合指标。完整的大学生邀请、匿名编号复用、指标口径、一个月记录和删除注意事项见 [测试指标使用说明](docs/user-testing-metrics.md)。
 
 前端只在 `localStorage` 保存 `free_time_agent_session_id`。刷新页面后会从 PostgreSQL 恢复当前问卷和已保存答案。
 
@@ -383,9 +398,18 @@ Set-Location "D:\yxy1.0"
   -s tests -p "test_*.py" -v
 
 node --test tests/*.test.js
+
+.\.venv\Scripts\python.exe -m py_compile `
+  main.py test_observability.py admin_metrics_service.py
+
+git diff --check
 ```
 
 Python 测试会创建临时 Session，并在结束后从 PostgreSQL 删除这些测试数据。
+
+测试指标交付的完整检查也可以直接使用上面四条命令的无 `-v` 版本；如果 PostgreSQL 不可用，Python 测试可能在模块启动时等待数据库连接，应记录被阻塞的原始命令和环境限制，不要把离线检查写成真实集成通过。
+
+管理员看板只适用于本地或受控环境。不要公开暴露 `/admin.html`、不要复用生产用户密码、不要把真实姓名或联系方式写入匿名测试记录；公网部署必须使用 HTTPS、受限的 `FRONTEND_ORIGINS` 和密钥管理。
 
 ## 9. 实机链路检查
 
