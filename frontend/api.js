@@ -63,22 +63,29 @@
       }
     }
 
-    function idempotencyKey(event) {
-      if (event.idempotency_key) return event.idempotency_key;
-      if (event.action_id) return `telemetry:${event.event_type}:${event.action_id}`;
+    function idempotencyKey(event, anonymousId) {
+      const scope = String(anonymousId || 'anonymous');
+      if (event.idempotency_key) {
+        const explicitKey = String(event.idempotency_key);
+        return explicitKey.startsWith(`telemetry:${scope}:`)
+          ? explicitKey
+          : `telemetry:${scope}:${explicitKey}`;
+      }
+      if (event.action_id) return `telemetry:${scope}:${event.event_type}:${event.action_id}`;
       sequence += 1;
-      return `telemetry:${event.event_type}:${Date.now().toString(36)}:${sequence}:${Math.random().toString(36).slice(2, 10)}`;
+      return `telemetry:${scope}:${event.event_type}:${Date.now().toString(36)}:${sequence}:${Math.random().toString(36).slice(2, 10)}`;
     }
 
     function report(event) {
       try {
         const { action_id: _actionId, ...rest } = event;
+        const anonymousId = getAnonymousId();
         const payload = {
           ...rest,
-          anonymous_id: getAnonymousId(),
+          anonymous_id: anonymousId,
           session_id: event.session_id ?? (typeof getSessionId === 'function' ? getSessionId() : null),
           metadata: event.metadata || {},
-          idempotency_key: idempotencyKey(event),
+          idempotency_key: idempotencyKey(event, anonymousId),
         };
         return Promise.resolve(recordEvent(payload)).catch((error) => {
           logFailure(error);
@@ -91,6 +98,16 @@
     }
 
     return { report };
+  }
+
+  function dedupeRecommendationTelemetryItems(items) {
+    const seen = new Set();
+    return (Array.isArray(items) ? items : []).filter((item) => {
+      const identity = item && (item.task_id || item.id || item.item_id);
+      if (!identity || seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
   }
 
   function createApi({ fetchImpl, storage, baseUrl = DEFAULT_BASE_URL } = {}) {
@@ -561,6 +578,7 @@
     USER_STORAGE_KEY,
     QUICK_STORAGE_KEY,
     createTestTelemetry,
+    dedupeRecommendationTelemetryItems,
     createApi,
   };
 }));

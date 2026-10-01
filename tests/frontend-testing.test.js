@@ -8,6 +8,7 @@ const {
   TEST_ANONYMOUS_ID_KEY,
   createTestTelemetry,
   createApi,
+  dedupeRecommendationTelemetryItems,
 } = require('../frontend/api.js');
 
 function storage(initial = {}) {
@@ -162,6 +163,43 @@ test('telemetry payloads get unique action keys while retries can reuse an expli
   assert.equal(payloads[0].metadata.task_category, '自我成长');
   assert.equal(payloads[2].idempotency_key, payloads[3].idempotency_key);
   assert.equal('action_id' in payloads[2], false);
+});
+
+test('telemetry idempotency keys are scoped by anonymous user while same-user retries stay stable', async () => {
+  const payloads = [];
+  const createReporter = (anonymousId) => createTestTelemetry({
+    getAnonymousId: () => anonymousId,
+    getSessionId: () => 'sess_shared',
+    recordEvent: async (payload) => {
+      payloads.push(payload);
+      return { recorded: true };
+    },
+  });
+  const firstUser = createReporter('student_004');
+  const secondUser = createReporter('student_005');
+  const event = { event_type: 'task_skipped', action_id: 'same-action' };
+
+  await firstUser.report(event);
+  await firstUser.report(event);
+  await secondUser.report(event);
+
+  assert.equal(payloads[0].idempotency_key, payloads[1].idempotency_key);
+  assert.notEqual(payloads[0].idempotency_key, payloads[2].idempotency_key);
+  assert.match(payloads[0].idempotency_key, /student_004/);
+  assert.match(payloads[2].idempotency_key, /student_005/);
+});
+
+test('recommendation telemetry dedupe uses the visible card task identity', () => {
+  const items = dedupeRecommendationTelemetryItems([
+    { id: 'recommendation-task-1', category: '自我成长' },
+    { id: 'plan-item-1', task_id: 'recommendation-task-1', category: '自我成长' },
+    { id: 'recommendation-task-2', category: '健康生活' },
+  ]);
+
+  assert.deepEqual(items.map((item) => item.id), [
+    'recommendation-task-1',
+    'recommendation-task-2',
+  ]);
 });
 
 test('recommendation hooks include category metadata and quick mode reports flow errors safely', () => {

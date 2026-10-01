@@ -188,11 +188,14 @@
 
   function reportRecommendationsViewed({ sessionId, planId, items, mode = null }) {
     const seen = new Set();
-    (Array.isArray(items) ? items : []).forEach((rawItem, index) => {
+    const telemetryItems = typeof api.dedupeRecommendationTelemetryItems === 'function'
+      ? api.dedupeRecommendationTelemetryItems(items)
+      : (Array.isArray(items) ? items : []);
+    telemetryItems.forEach((rawItem, index) => {
       const category = rawItem && (rawItem.category || rawItem.task_category);
       if (!category) return;
       const item = rawItem.category ? rawItem : { ...rawItem, category };
-      const identity = item.id || item.task_id || item.item_id || `index-${index}`;
+      const identity = item.task_id || item.id || item.item_id || `index-${index}`;
       if (seen.has(identity)) return;
       seen.add(identity);
       void reportTestEvent({

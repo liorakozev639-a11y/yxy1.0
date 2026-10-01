@@ -36,6 +36,38 @@
 - `git diff --check`
   - PASS: no whitespace errors. Git reported existing LF/CRLF normalization warnings only.
 
+## Review-Fix 2
+
+- `frontend/api.js`
+  - Scoped generated and explicit telemetry idempotency keys with the stable `anonymous_id` returned by `getAnonymousId()`.
+  - Same-user retries keep the same key for the same `action_id` or explicit key, while different anonymous users cannot collide on those values.
+  - Added `dedupeRecommendationTelemetryItems`, using `task_id || id || item_id` so telemetry identity matches visible recommendation-card merge semantics.
+- `frontend/app.js`
+  - Full and quick recommendation-view reporting now uses the shared task-identity dedupe helper before emitting per-card events.
+- `tests/frontend-testing.test.js`
+  - Added a focused anonymous-scope idempotency test covering same-user retry stability and cross-user key separation.
+  - Added a focused recommendation dedupe test covering a recommendation task and plan item that share `task_id` but have different `id` values.
+
+## Review-Fix 2 Verification
+
+- `node --test tests/frontend-testing.test.js`
+  - PASS: 10 tests.
+- `node --test tests/frontend-flow.test.js tests/frontend-execution.test.js tests/frontend-api.test.js`
+  - PASS: 28 tests.
+- `node --check frontend/api.js`
+  - PASS.
+- `node --check frontend/app.js`
+  - PASS.
+- `node --check frontend/admin.js`
+  - PASS.
+- `git diff --check`
+  - PASS: no whitespace errors. Git reported existing LF/CRLF normalization warnings only.
+
+## Review-Fix 2 Remaining Concerns
+
+- No live browser interaction or PostgreSQL-backed end-to-end dashboard run was available; verification remains focused on executable Node tests, source hooks, and syntax checks.
+- The API wrapper scopes app-provided explicit keys at submission time; direct callers of the backend API outside `createTestTelemetry` remain responsible for supplying globally unique idempotency keys.
+
 ## Remaining concerns
 
 - No live browser interaction or PostgreSQL-backed end-to-end dashboard run was available in this task; verification is focused on API wrappers, source hooks, and existing Node frontend tests.
