@@ -276,7 +276,7 @@ class AdminMetricsService:
         return (" WHERE " + " AND ".join(clauses) if clauses else "", tuple(params))
 
     @staticmethod
-    def _feedback_date_where(filters: MetricsFilters) -> tuple[str, tuple[object, ...]]:
+    def _feedback_where(filters: MetricsFilters) -> tuple[str, tuple[object, ...]]:
         clauses: list[str] = []
         params: list[object] = []
         if filters.from_date:
@@ -287,6 +287,12 @@ class AdminMetricsService:
             params.append(
                 datetime.combine(filters.to_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
             )
+        if filters.cohort:
+            clauses.append("u.cohort = %s")
+            params.append(filters.cohort)
+        if filters.anonymous_id:
+            clauses.append("f.anonymous_id = %s")
+            params.append(filters.anonymous_id)
         return (" WHERE " + " AND ".join(clauses) if clauses else "", tuple(params))
 
     @staticmethod
@@ -297,32 +303,49 @@ class AdminMetricsService:
 
     def summary(self, filters: MetricsFilters) -> dict[str, Any]:
         where, params = self._event_where(filters)
-        feedback_where, feedback_params = self._feedback_date_where(filters)
+        feedback_where, feedback_params = self._feedback_where(filters)
+        feedback_category_where = ""
+        feedback_category_params: tuple[object, ...] = ()
+        if filters.task_category:
+            feedback_category_where = "WHERE category_by_plan_item.task_category = %s"
+            feedback_category_params = (filters.task_category,)
         statement = f"""
             /* admin_metrics:summary */
-            WITH scoped_events AS (
+            WITH category_by_plan_item AS (
+                SELECT DISTINCT ON (e.plan_item_id)
+                    e.plan_item_id,
+                    e.metadata_json ->> 'task_category' AS task_category
+                FROM test_events e
+                WHERE e.plan_item_id IS NOT NULL
+                  AND e.metadata_json ? 'task_category'
+                ORDER BY e.plan_item_id, e.occurred_at DESC, e.id DESC
+            ), feedback_records AS (
+                SELECT DISTINCT f.plan_item_id, f.rating
+                FROM task_test_feedback f
+                JOIN test_users u ON u.anonymous_id = f.anonymous_id
+                {feedback_where}
+            ), scoped_feedback AS (
+                SELECT f.plan_item_id, f.rating
+                FROM feedback_records f
+                {'JOIN category_by_plan_item ON category_by_plan_item.plan_item_id = f.plan_item_id' if filters.task_category else ''}
+                {feedback_category_where}
+            ), scoped_events AS (
                 SELECT e.anonymous_id, e.session_id, e.plan_item_id, e.event_type
                 FROM test_events e
                 JOIN test_users u ON u.anonymous_id = e.anonymous_id
                 {where}
-            ), scoped_feedback AS (
-                SELECT DISTINCT f.plan_item_id, f.rating, f.session_id
-                FROM task_test_feedback f
-                JOIN (
-                    SELECT DISTINCT e.plan_item_id
-                    FROM scoped_events e
-                    WHERE e.plan_item_id IS NOT NULL
-                ) feedback_plan_items ON feedback_plan_items.plan_item_id = f.plan_item_id
-                {feedback_where}
+            ), created_sessions AS (
+                SELECT DISTINCT e.session_id
+                FROM scoped_events e
+                WHERE e.event_type = 'session_created' AND e.session_id IS NOT NULL
+            ), completed_sessions AS (
+                SELECT DISTINCT e.session_id
+                FROM scoped_events e
+                JOIN created_sessions ON created_sessions.session_id = e.session_id
+                WHERE e.event_type = 'feedback_submitted' AND e.session_id IS NOT NULL
             ), event_totals AS (
                 SELECT
                     COUNT(DISTINCT e.anonymous_id) AS user_count,
-                    COUNT(DISTINCT e.session_id) FILTER (
-                        WHERE e.event_type = 'session_created' AND e.session_id IS NOT NULL
-                    ) AS session_count,
-                    COUNT(DISTINCT e.session_id) FILTER (
-                        WHERE e.event_type = 'feedback_submitted' AND e.session_id IS NOT NULL
-                    ) AS completed_sessions,
                     COUNT(*) FILTER (WHERE e.event_type = 'task_replaced') AS replacement_count,
                     COUNT(*) FILTER (WHERE e.event_type = 'task_skipped') AS skip_count,
                     COUNT(*) FILTER (WHERE e.event_type = 'recommendations_viewed') AS recommendation_count
@@ -333,25 +356,32 @@ class AdminMetricsService:
                 FROM scoped_feedback f
             )
             SELECT
-                e.user_count, e.session_count, e.completed_sessions, f.average_rating,
+                e.user_count,
+                (SELECT COUNT(*) FROM created_sessions) AS session_count,
+                (SELECT COUNT(*) FROM completed_sessions) AS completed_sessions,
+                f.average_rating,
                 e.replacement_count, e.skip_count, e.recommendation_count
             FROM event_totals e
             CROSS JOIN feedback_totals f
         """
         with self._connect() as connection:
-            row = connection.execute(statement, params + feedback_params).fetchone() or {}
+            row = connection.execute(
+                statement, feedback_params + feedback_category_params + params
+            ).fetchone() or {}
         sessions = row.get("session_count", 0)
         recommendations = row.get("recommendation_count", 0)
         return {
             "user_count": int(row.get("user_count") or 0),
             "session_count": int(sessions or 0),
-            "full_flow_success_rate": self._rate(row.get("completed_sessions"), sessions),
+            "full_flow_success_rate": min(
+                100.0, self._rate(row.get("completed_sessions"), sessions)
+            ),
             "average_rating": round(float(row.get("average_rating") or 0), 2),
             "replacement_rate": self._rate(row.get("replacement_count"), recommendations),
             "skip_rate": self._rate(row.get("skip_count"), recommendations),
         }
 
-    def funnel(self, filters: MetricsFilters) -> list[dict[str, Any]]:
+    def funnel(self, filters: MetricsFilters) -> dict[str, Any]:
         where, params = self._event_where(filters)
         statement = f"""
             /* admin_metrics:funnel */
@@ -365,14 +395,46 @@ class AdminMetricsService:
         with self._connect() as connection:
             rows = connection.execute(statement, params + (list(_FUNNEL_EVENTS),)).fetchall()
         counts = {row["event_type"]: int(row["count"]) for row in rows}
-        return [{"event_type": event_type, "count": counts.get(event_type, 0)} for event_type in _FUNNEL_EVENTS]
+        return {
+            "steps": [
+                {"event_type": event_type, "count": counts.get(event_type, 0)}
+                for event_type in _FUNNEL_EVENTS
+            ]
+        }
 
     def recommendations(self, filters: MetricsFilters) -> list[dict[str, Any]]:
         where, params = self._event_where(filters)
-        feedback_where, feedback_params = self._feedback_date_where(filters)
+        feedback_where, feedback_params = self._feedback_where(filters)
+        feedback_category_where = ""
+        feedback_category_params: tuple[object, ...] = ()
+        if filters.task_category:
+            feedback_category_where = "WHERE category_by_plan_item.task_category = %s"
+            feedback_category_params = (filters.task_category,)
         statement = f"""
             /* admin_metrics:recommendations */
-            WITH scoped_events AS (
+            WITH category_by_plan_item AS (
+                SELECT DISTINCT ON (e.plan_item_id)
+                    e.plan_item_id,
+                    e.metadata_json ->> 'task_category' AS task_category
+                FROM test_events e
+                WHERE e.plan_item_id IS NOT NULL
+                  AND e.metadata_json ? 'task_category'
+                ORDER BY e.plan_item_id, e.occurred_at DESC, e.id DESC
+            ), feedback_records AS (
+                SELECT DISTINCT f.plan_item_id, f.rating
+                FROM task_test_feedback f
+                JOIN test_users u ON u.anonymous_id = f.anonymous_id
+                {feedback_where}
+            ), scoped_feedback AS (
+                SELECT
+                    f.plan_item_id,
+                    f.rating,
+                    COALESCE(category_by_plan_item.task_category, 'unknown') AS task_category
+                FROM feedback_records f
+                LEFT JOIN category_by_plan_item
+                    ON category_by_plan_item.plan_item_id = f.plan_item_id
+                {feedback_category_where}
+            ), scoped_events AS (
                 SELECT e.plan_item_id, e.event_type, e.metadata_json ->> 'task_category' AS task_category
                 FROM test_events e
                 JOIN test_users u ON u.anonymous_id = e.anonymous_id
@@ -386,33 +448,30 @@ class AdminMetricsService:
                     COUNT(*) FILTER (WHERE event_type = 'task_skipped') AS skip_count
                 FROM scoped_events
                 GROUP BY task_category
-            ), feedback_plan_items AS (
-                SELECT DISTINCT task_category, plan_item_id
-                FROM scoped_events
-                WHERE plan_item_id IS NOT NULL
-            ), scoped_feedback AS (
-                SELECT DISTINCT f.plan_item_id, f.rating
-                FROM task_test_feedback f
-                JOIN feedback_plan_items ON feedback_plan_items.plan_item_id = f.plan_item_id
-                {feedback_where}
             ), feedback_by_category AS (
-                SELECT feedback_plan_items.task_category, AVG(scoped_feedback.rating) AS average_rating
-                FROM feedback_plan_items
-                JOIN scoped_feedback ON scoped_feedback.plan_item_id = feedback_plan_items.plan_item_id
-                GROUP BY feedback_plan_items.task_category
+                SELECT task_category, AVG(rating) AS average_rating
+                FROM scoped_feedback
+                GROUP BY task_category
+            ), categories AS (
+                SELECT task_category FROM category_events
+                UNION
+                SELECT task_category FROM feedback_by_category
             )
             SELECT
-                category_events.task_category,
-                category_events.recommendation_count,
+                categories.task_category,
+                COALESCE(category_events.recommendation_count, 0) AS recommendation_count,
                 feedback_by_category.average_rating,
-                category_events.replacement_count,
-                category_events.skip_count
-            FROM category_events
-            LEFT JOIN feedback_by_category ON feedback_by_category.task_category = category_events.task_category
-            ORDER BY category_events.task_category ASC
+                COALESCE(category_events.replacement_count, 0) AS replacement_count,
+                COALESCE(category_events.skip_count, 0) AS skip_count
+            FROM categories
+            LEFT JOIN category_events ON category_events.task_category = categories.task_category
+            LEFT JOIN feedback_by_category ON feedback_by_category.task_category = categories.task_category
+            ORDER BY categories.task_category ASC
         """
         with self._connect() as connection:
-            rows = connection.execute(statement, params + feedback_params).fetchall()
+            rows = connection.execute(
+                statement, feedback_params + feedback_category_params + params
+            ).fetchall()
         return [
             {
                 "task_category": row["task_category"],

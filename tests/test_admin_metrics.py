@@ -266,14 +266,16 @@ class AdminMetricsServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             self.service.funnel(filters),
-            [
-                {"event_type": "session_created", "count": 4},
-                {"event_type": "questionnaire_completed", "count": 0},
-                {"event_type": "recommendations_viewed", "count": 0},
-                {"event_type": "task_started", "count": 0},
-                {"event_type": "task_completed", "count": 0},
-                {"event_type": "feedback_submitted", "count": 3},
-            ],
+            {
+                "steps": [
+                    {"event_type": "session_created", "count": 4},
+                    {"event_type": "questionnaire_completed", "count": 0},
+                    {"event_type": "recommendations_viewed", "count": 0},
+                    {"event_type": "task_started", "count": 0},
+                    {"event_type": "task_completed", "count": 0},
+                    {"event_type": "feedback_submitted", "count": 3},
+                ]
+            },
         )
         self.assertEqual(
             self.service.recommendations(filters),
@@ -337,26 +339,33 @@ class AdminMetricsServiceTests(unittest.TestCase):
             for statement, _ in self.connection.executions
             if "admin_metrics:summary" in statement
         )
-        self.assertIn("SELECT DISTINCT e.plan_item_id", statement)
+        self.assertIn("SELECT DISTINCT f.plan_item_id, f.rating", statement)
         self.assertIn("feedback_totals AS", statement)
-        self.assertNotIn("LEFT JOIN scoped_feedback f ON f.plan_item_id = e.plan_item_id", statement)
+        self.assertNotIn("JOIN feedback_plan_items ON feedback_plan_items.plan_item_id = f.plan_item_id", statement)
 
-    def test_summary_uses_session_created_and_feedback_submitted_for_full_flow(self) -> None:
+    def test_summary_full_flow_counts_only_feedback_for_created_sessions_in_the_window(self) -> None:
         self.connection.metric_rows["summary"][0].update(
-            {"session_count": 2, "completed_sessions": 1}
+            {"session_count": 1, "completed_sessions": 2}
         )
 
-        self.assertEqual(self.service.summary(MetricsFilters())["full_flow_success_rate"], 50.0)
+        self.assertEqual(self.service.summary(MetricsFilters())["full_flow_success_rate"], 100.0)
         statement = next(
             statement
             for statement, _ in self.connection.executions
             if "admin_metrics:summary" in statement
         )
-        self.assertIn("e.event_type = 'session_created'", statement)
+        self.assertIn("created_sessions AS", statement)
+        self.assertIn("WHERE e.event_type = 'session_created'", statement)
+        self.assertIn("JOIN created_sessions", statement)
         self.assertIn("e.event_type = 'feedback_submitted'", statement)
 
-    def test_feedback_ratings_are_scoped_by_feedback_created_at(self) -> None:
-        filters = MetricsFilters(from_date=date(2026, 9, 1), to_date=date(2026, 9, 30))
+    def test_feedback_ratings_keep_feedback_in_window_when_events_are_missing_or_outside_window(self) -> None:
+        filters = MetricsFilters(
+            from_date=date(2026, 9, 1),
+            to_date=date(2026, 9, 30),
+            cohort="student_2026_09",
+            anonymous_id="student_001",
+        )
 
         self.service.summary(filters)
         self.service.recommendations(filters)
@@ -368,13 +377,19 @@ class AdminMetricsServiceTests(unittest.TestCase):
         ):
             self.assertIn("f.created_at >= %s", statement)
             self.assertIn("f.created_at < %s", statement)
+            self.assertIn("JOIN test_users u ON u.anonymous_id = f.anonymous_id", statement)
+            self.assertNotIn("FROM scoped_events e\n                    WHERE e.plan_item_id", statement)
             self.assertEqual(
                 params,
                 (
                     datetime(2026, 9, 1, tzinfo=timezone.utc),
                     datetime(2026, 10, 1, tzinfo=timezone.utc),
+                    "student_2026_09",
+                    "student_001",
                     datetime(2026, 9, 1, tzinfo=timezone.utc),
                     datetime(2026, 10, 1, tzinfo=timezone.utc),
+                    "student_2026_09",
+                    "student_001",
                 ),
             )
 
@@ -403,9 +418,11 @@ class AdminMetricsServiceTests(unittest.TestCase):
             if "admin_metrics:recommendations" in statement
         )
         self.assertIn("feedback_by_category AS", statement)
-        self.assertIn("SELECT DISTINCT task_category, plan_item_id", statement)
+        self.assertIn("category_by_plan_item AS", statement)
+        self.assertIn("DISTINCT ON (e.plan_item_id)", statement)
         self.assertIn("SELECT DISTINCT f.plan_item_id, f.rating", statement)
-        self.assertNotIn("LEFT JOIN task_test_feedback f ON f.plan_item_id = e.plan_item_id", statement)
+        self.assertIn("JOIN category_by_plan_item", statement)
+        self.assertNotIn("JOIN feedback_plan_items ON feedback_plan_items.plan_item_id = f.plan_item_id", statement)
 
     def test_empty_metrics_are_zero_or_empty(self) -> None:
         self.connection.metric_rows = {
