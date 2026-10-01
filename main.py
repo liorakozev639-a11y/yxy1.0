@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime
 import logging
+import re
 from typing import Any, Literal, Optional
 
 import psycopg
@@ -44,6 +45,7 @@ from admin_metrics_service import AdminMetricsService, MetricsFilters
 from test_observability import TestObservabilityService
 
 logger = logging.getLogger(__name__)
+_ADMIN_ANONYMOUS_ID = re.compile(r"student_\d{3,6}\Z")
 
 ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
@@ -619,12 +621,26 @@ def create_app(
     ) -> dict[str, Any]:
         return success(require_admin_service().recommendations(filters))
 
+    @app.get("/api/v1/admin/metrics/energy-recommendations")
+    def admin_metrics_energy_recommendations(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
+        filters: MetricsFilters = Depends(metrics_filters),
+    ) -> dict[str, Any]:
+        return success(require_admin_service().energy_recommendations(filters))
+
     @app.get("/api/v1/admin/metrics/reasons")
     def admin_metrics_reasons(
         _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
         filters: MetricsFilters = Depends(metrics_filters),
     ) -> dict[str, Any]:
         return success(require_admin_service().reasons(filters))
+
+    @app.get("/api/v1/admin/metrics/reason-details")
+    def admin_metrics_reason_details(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
+        filters: MetricsFilters = Depends(metrics_filters),
+    ) -> dict[str, Any]:
+        return success(require_admin_service().reason_details(filters))
 
     @app.get("/api/v1/admin/metrics/errors")
     def admin_metrics_errors(
@@ -633,11 +649,20 @@ def create_app(
     ) -> dict[str, Any]:
         return success(require_admin_service().errors(filters))
 
+    @app.get("/api/v1/admin/metrics/user-detail")
+    def admin_metrics_user_detail(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
+        filters: MetricsFilters = Depends(metrics_filters),
+    ) -> dict[str, Any]:
+        return success(require_admin_service().user_detail(filters))
+
     @app.delete("/api/v1/admin/test-users/{anonymous_id}")
     def admin_delete_test_user(
         anonymous_id: str,
         _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
     ) -> dict[str, Any]:
+        if not _ADMIN_ANONYMOUS_ID.fullmatch(anonymous_id):
+            raise HTTPException(status_code=400, detail="anonymous_id 必须是匿名 student_ 编号")
         try:
             deleted = require_observability_service().delete_anonymous_data(anonymous_id)
         except ValueError as exc:

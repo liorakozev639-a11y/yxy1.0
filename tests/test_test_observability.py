@@ -230,6 +230,7 @@ class TestObservabilityServiceTests(unittest.TestCase):
                 "task_category": "study",
                 "energy_level": "medium",
                 "available_minutes": 30,
+                "reason_detail": "先做最容易开始的部分",
                 "email": "not-stored@example.com",
             },
             idempotency_key="event_003",
@@ -249,7 +250,12 @@ class TestObservabilityServiceTests(unittest.TestCase):
         self.assertEqual(len(self.connection.events), 1)
         self.assertEqual(
             first["metadata"],
-            {"task_category": "study", "energy_level": "medium", "available_minutes": 30},
+            {
+                "task_category": "study",
+                "energy_level": "medium",
+                "available_minutes": 30,
+                "reason_detail": "先做最容易开始的部分",
+            },
         )
         event_executions = [
             execution
@@ -319,6 +325,17 @@ class TestObservabilityServiceTests(unittest.TestCase):
                         reason_code=None,
                         metadata={"error_code": f"timeout{control}"},
                         idempotency_key=f"event{control}",
+                    )
+                with self.assertRaises(ValueError):
+                    self.service.record_event(
+                        anonymous_id="student_001",
+                        event_type="task_skipped",
+                        session_id=None,
+                        plan_id=None,
+                        plan_item_id=None,
+                        reason_code="other",
+                        metadata={"reason_detail": f"detail{control}"},
+                        idempotency_key=f"detail_{ord(control)}",
                     )
                 with self.assertRaises(ValueError):
                     self.service.record_event(

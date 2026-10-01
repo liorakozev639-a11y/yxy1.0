@@ -15,6 +15,40 @@
   const QUICK_STORAGE_KEY = 'free_time_agent_quick_session_id';
   const TEST_ANONYMOUS_ID_KEY = 'mvp_test_anonymous_id';
   const ADMIN_TOKEN_STORAGE_KEY = 'mvp_admin_metrics_token';
+  let anonymousIdSequence = 0;
+  const generatedAnonymousIds = new Set();
+
+  function randomUint32() {
+    try {
+      if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+        const values = new Uint32Array(1);
+        globalThis.crypto.getRandomValues(values);
+        return values[0];
+      }
+    } catch (_) {
+      // Fall through to the session-local entropy source.
+    }
+    anonymousIdSequence += 1;
+    const time = Date.now() >>> 0;
+    const random = Math.floor(Math.random() * 0x100000000) >>> 0;
+    return (time ^ random ^ anonymousIdSequence) >>> 0;
+  }
+
+  function generateTestAnonymousId() {
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const number = 100000 + (randomUint32() % 900000);
+      const candidate = `student_${number}`;
+      if (!generatedAnonymousIds.has(candidate)) {
+        generatedAnonymousIds.add(candidate);
+        return candidate;
+      }
+    }
+    anonymousIdSequence += 1;
+    const number = 100000 + (anonymousIdSequence % 900000);
+    const candidate = `student_${number}`;
+    generatedAnonymousIds.add(candidate);
+    return candidate;
+  }
 
   function isLocalHostname(hostname) {
     return hostname === 'localhost'
@@ -114,6 +148,7 @@
     if (typeof fetchImpl !== 'function') throw new Error('fetchImpl 必须是函数');
     if (!storage) throw new Error('storage 不能为空');
     const apiBase = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
+    let inMemoryTestAnonymousId = null;
 
     async function request(path, { method = 'GET', body, headers: extraHeaders = {} } = {}) {
       const headers = { ...extraHeaders };
@@ -170,15 +205,22 @@
     }
 
     function getTestAnonymousId() {
+      let existing = null;
       try {
-        const existing = storage.getItem(TEST_ANONYMOUS_ID_KEY);
-        if (existing) return existing;
-        const generated = `student_${String(Math.floor(100000 + Math.random() * 900000))}`;
-        storage.setItem(TEST_ANONYMOUS_ID_KEY, generated);
-        return generated;
+        existing = storage.getItem(TEST_ANONYMOUS_ID_KEY);
       } catch (_) {
-        return 'student_000000';
+        // Private browsing and blocked storage still need a distinct session id.
       }
+      if (existing) return existing;
+      if (inMemoryTestAnonymousId) return inMemoryTestAnonymousId;
+      const generated = generateTestAnonymousId();
+      inMemoryTestAnonymousId = generated;
+      try {
+        storage.setItem(TEST_ANONYMOUS_ID_KEY, generated);
+      } catch (_) {
+        // Keep the id in the module/session memory when storage is unavailable.
+      }
+      return generated;
     }
 
     async function ensureAnonymousUser() {

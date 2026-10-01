@@ -20,6 +20,14 @@ function storage(initial = {}) {
   };
 }
 
+function blockedStorage() {
+  return {
+    getItem() { throw new Error('storage blocked'); },
+    setItem() { throw new Error('storage blocked'); },
+    removeItem() { throw new Error('storage blocked'); },
+  };
+}
+
 function response(data, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -73,6 +81,22 @@ test('testing identity is generated once and reused from localStorage', () => {
   assert.match(first, /^student_\d{6}$/);
   assert.equal(second, first);
   assert.equal(store.getItem(TEST_ANONYMOUS_ID_KEY), first);
+});
+
+test('storage-blocked browsers receive unique random anonymous ids without a shared literal fallback', () => {
+  const first = createApi({ storage: blockedStorage(), fetchImpl: async () => response({}) });
+  const second = createApi({ storage: blockedStorage(), fetchImpl: async () => response({}) });
+
+  const firstId = first.getTestAnonymousId();
+  assert.equal(first.getTestAnonymousId(), firstId);
+  const secondId = second.getTestAnonymousId();
+
+  assert.match(firstId, /^student_\d{6}$/);
+  assert.match(secondId, /^student_\d{6}$/);
+  assert.notEqual(firstId, secondId);
+  assert.notEqual(firstId, 'student_000000');
+  assert.notEqual(secondId, 'student_000000');
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'frontend', 'api.js'), 'utf8'), /student_000000/);
 });
 
 test('admin login stores token and metric requests send filters without user state', async () => {
@@ -236,7 +260,10 @@ test('admin dashboard is isolated and requests all required metric views', () =>
   assert.match(html, /admin-login/);
   assert.match(html, /anonymous_id/);
   assert.match(js, /adminLogin/);
-  for (const view of ['summary', 'funnel', 'recommendations', 'reasons', 'errors']) {
+  for (const view of [
+    'summary', 'funnel', 'recommendations', 'energy-recommendations',
+    'reasons', 'reason-details', 'errors', 'user-detail',
+  ]) {
     assert.match(js, new RegExp(`adminMetrics\\(['"]${view}['"]`));
   }
   for (const filter of ['from', 'cohort', 'anonymous_id', 'task_category']) {

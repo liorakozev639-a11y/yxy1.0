@@ -20,7 +20,7 @@
 
 ### 在浏览器中复用
 
-前端把编号保存在浏览器 `localStorage` 的 `mvp_test_anonymous_id` 中。第一次打开主页时，如果没有编号，前端会生成一个合法的 `student_` 编号并自动向 `/api/v1/test-users/identify` 登记。
+前端优先把编号保存在浏览器 `localStorage` 的 `mvp_test_anonymous_id` 中。第一次打开主页时，如果没有编号，前端会使用浏览器 `crypto` 随机源生成一个合法的 `student_` 编号并自动向 `/api/v1/test-users/identify` 登记；如果浏览器禁止存储，则只在当前页面会话内保留随机编号，不会退回到所有用户共用的固定编号。编号只用于区分测试样本，不包含姓名、手机号、邮箱或其他个人信息。
 
 如果测试负责人需要预先分配编号，在测试者第一次打开页面前，在同一浏览器配置中设置：
 
@@ -82,14 +82,14 @@ http://127.0.0.1:5173/admin.html
 
 1. 打开看板，填写管理员账号和密码并登录。登录成功后浏览器暂存短期 bearer token；不要复制或分享 token。
 2. 在开始日期、结束日期、测试批次、匿名编号和任务分类中输入筛选条件，点击“刷新指标”。日期范围按 UTC 日期边界处理，结束日期包含当天。
-3. 检查流程漏斗、推荐效果、跳过与替换原因和流程错误。看板只显示计数、百分比、平均评分和错误代码，不显示姓名、邮箱等个人身份字段。
+3. 检查流程漏斗、推荐效果、精力与推荐关系、跳过与替换原因、原因补充说明、流程错误和匿名用户明细。明细只显示匿名编号、批次、行为计数和限制为 500 字的补充说明，不显示姓名、邮箱等个人身份字段。
 4. 离开看板时点击“退出”。退出会撤销当前 token；关闭浏览器或发现 token 泄露时也应退出并通知管理员。
 
 所有管理员指标路由都要求 bearer 认证，认证在筛选条件解析前执行。缺少或无效认证应返回 401；不能用错误的日期或分类筛选绕过登录。
 
 ## 指标口径
 
-看板提供五组接口：`summary`、`funnel`、`recommendations`、`reasons`、`errors`。事件时间使用 `occurred_at`，评价时间使用 `created_at`。
+看板提供八组接口：`summary`、`funnel`、`recommendations`、`energy-recommendations`、`reasons`、`reason-details`、`errors`、`user-detail`。事件时间使用 `occurred_at`，评价时间使用 `created_at`。
 
 | 指标 | 口径 |
 | --- | --- |
@@ -101,8 +101,11 @@ http://127.0.0.1:5173/admin.html
 | `summary.skip_rate` | `task_skipped` 事件数 ÷ `recommendations_viewed` 事件数，百分比。 |
 | `funnel` | 按事件发生次数返回 `session_created`、`questionnaire_completed`、`recommendations_viewed`、`task_started`、`task_completed`、`feedback_submitted` 六个步骤；不会把每一步误当成去重用户数。 |
 | `recommendations` | 按 `task_category` 汇总推荐查看次数、评价平均分、替换率和跳过率。评价通过该计划项最近一次带分类的事件映射到分类；没有分类事件的评价归入 `unknown`。 |
+| `energy-recommendations` | 按事件 metadata 中的 `energy_level` 和 `task_category` 汇总推荐查看次数、评价平均分、替换率和跳过率；只使用已上报的精力值，不重新计算推荐结果。 |
 | `reasons` | 所有带 `reason_code` 的跳过/替换事件按原因代码计数，并按数量降序展示。 |
+| `reason-details` | 返回最近 100 条带原因代码和非空 `reason_detail` 的匿名事件，文本服务端限制为 500 字并进行 HTML 转义；只展示匿名编号、原因代码、说明和时间。 |
 | `errors` | `flow_error` 事件 metadata 中的 `error_code` 计数，最多返回 100 个代码；缺少代码归为 `unknown`。 |
+| `user-detail` | 按 `anonymous_id`（可选）返回匿名编号、批次、事件/会话/完成/跳过/替换计数和平均评分；不返回姓名、联系方式或其他个人身份字段。 |
 
 日期、`cohort` 和 `anonymous_id` 会作用于相应事件或评价记录；`task_category` 会筛选带分类的事件，并对评价使用计划项的分类映射。指标是匿名聚合数据，不能反推出完成率等于独立用户数。
 
@@ -114,7 +117,7 @@ http://127.0.0.1:5173/admin.html
 
 ### 隐私、保留和删除
 
-- 测试遥测只应包含匿名编号、会话/计划项 ID、允许的事件、原因代码、有限 metadata 和 1 到 5 分评价；不要发送姓名、邮箱、学号、精确住址或自由文本中的身份信息。
+- 测试遥测只应包含匿名编号、会话/计划项 ID、允许的事件、原因代码、最多 500 字的 `reason_detail`、有限 metadata 和 1 到 5 分评价；不要发送姓名、邮箱、学号、精确住址或自由文本中的身份信息。
 - 匿名编号和真实身份分配表必须分开保存，并限制访问。`comment` 仅用于短评，最长 500 字符；测试负责人应先检查内容再导出。
 - 匿名观测数据默认保留 90 天，截止时间按 `test_users.last_seen_at < 当前时间 - 90 天` 判断。90 天清理不会自动由后台调度；管理员应在受控维护窗口打开看板并点击“清理超过 90 天的数据”，或使用已认证的 `POST /api/v1/admin/test-observations/cleanup`。接口返回本次删除的匿名用户数量，重复运行是安全的。
 - 删除单个测试者时，管理员先在看板输入匿名编号并确认，或调用已认证的 `DELETE /api/v1/admin/test-users/{anonymous_id}`。这两个操作只删除 `test_users` 及其级联的 `test_events`、`task_test_feedback` 观测数据，不删除业务 `sessions`、`plans`、`plan_items` 或正常业务反馈；管理员会话也不会被清理操作删除。

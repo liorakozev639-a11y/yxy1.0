@@ -48,6 +48,7 @@ REASON_CODES = frozenset(
 _ANONYMOUS_ID = re.compile(r"student_\d{3,6}\Z")
 _COHORT = re.compile(r"student_[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\Z")
 _MAX_COMMENT_LENGTH = 500
+_MAX_REASON_DETAIL_LENGTH = 500
 
 
 def _make_id(prefix: str) -> str:
@@ -136,6 +137,11 @@ class TestObservabilityService:
             if not isinstance(error_code, str) or not _is_safe_text(error_code, 64):
                 raise ValueError("error_code 必须是长度不超过 64 的安全文本")
             cleaned["error_code"] = error_code
+        reason_detail = metadata.get("reason_detail")
+        if reason_detail is not None:
+            if not isinstance(reason_detail, str) or not _is_safe_text(reason_detail, _MAX_REASON_DETAIL_LENGTH):
+                raise ValueError("reason_detail 必须是长度不超过 500 的安全文本")
+            cleaned["reason_detail"] = reason_detail
         return cleaned
 
     @staticmethod

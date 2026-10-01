@@ -50,12 +50,15 @@
     dashboardError.textContent = '';
     const selected = filters();
     try {
-      const [summary, funnel, recommendations, reasons, errors] = await Promise.all([
+      const [summary, funnel, recommendations, energyRecommendations, reasons, reasonDetails, errors, userDetail] = await Promise.all([
         api.adminMetrics('summary', selected),
         api.adminMetrics('funnel', selected),
         api.adminMetrics('recommendations', selected),
+        api.adminMetrics('energy-recommendations', selected),
         api.adminMetrics('reasons', selected),
+        api.adminMetrics('reason-details', selected),
         api.adminMetrics('errors', selected),
+        api.adminMetrics('user-detail', selected),
       ]);
       renderSummary(summary);
       renderTable('#funnel', [['event_type', '事件'], ['count', '次数']], funnel?.steps);
@@ -63,8 +66,23 @@
         ['task_category', '任务分类'], ['recommendation_count', '推荐次数'],
         ['average_rating', '平均评分'], ['replacement_rate', '替换率'], ['skip_rate', '跳过率'],
       ], recommendations);
+      renderTable('#energy-recommendations', [
+        ['energy_level', '当前精力'], ['task_category', '推荐分类'],
+        ['recommendation_count', '推荐次数'], ['average_rating', '平均评分'],
+        ['replacement_rate', '替换率'], ['skip_rate', '跳过率'],
+      ], energyRecommendations);
       renderTable('#reasons', [['reason_code', '原因'], ['count', '次数']], reasons);
+      renderTable('#reason-details', [
+        ['anonymous_id', '匿名编号'], ['reason_code', '原因'],
+        ['detail', '补充说明'], ['occurred_at', '时间'],
+      ], reasonDetails);
       renderTable('#errors', [['error_code', '错误代码'], ['count', '次数']], errors);
+      renderTable('#user-detail', [
+        ['anonymous_id', '匿名编号'], ['cohort', '测试批次'],
+        ['event_count', '事件数'], ['session_count', '会话数'],
+        ['completed_count', '完成数'], ['skipped_count', '跳过数'],
+        ['replaced_count', '替换数'], ['average_rating', '平均评分'],
+      ], userDetail);
     } catch (error) {
       dashboardError.textContent = error.message || '指标暂时无法加载';
       if (error.status === 401) showLogin();

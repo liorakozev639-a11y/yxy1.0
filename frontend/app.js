@@ -87,6 +87,7 @@
   let deferredInstallPrompt = null;
   let testActionSequence = 0;
   let telemetryReporter = null;
+  let inMemoryTestAnonymousId = null;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
@@ -96,15 +97,22 @@
 
   function ensureTestAnonymousId() {
     if (typeof api.getTestAnonymousId === 'function') return api.getTestAnonymousId();
+    if (inMemoryTestAnonymousId) return inMemoryTestAnonymousId;
+    const randomSource = window.crypto && typeof window.crypto.getRandomValues === 'function'
+      ? window.crypto.getRandomValues.bind(window.crypto)
+      : null;
+    const values = new Uint32Array(1);
+    if (randomSource) randomSource(values);
+    const entropy = values[0] || Math.floor(Math.random() * 900000);
+    inMemoryTestAnonymousId = `student_${100000 + (entropy % 900000)}`;
     try {
       const existing = window.localStorage.getItem(TEST_ANONYMOUS_ID_KEY);
       if (existing) return existing;
-      const generated = `student_${String(Math.floor(100000 + Math.random() * 900000))}`;
-      window.localStorage.setItem(TEST_ANONYMOUS_ID_KEY, generated);
-      return generated;
+      window.localStorage.setItem(TEST_ANONYMOUS_ID_KEY, inMemoryTestAnonymousId);
     } catch (_) {
-      return 'student_000000';
+      // Keep the browser-session id in memory when storage is unavailable.
     }
+    return inMemoryTestAnonymousId;
   }
 
   function createTestActionId(action) {
@@ -158,9 +166,10 @@
     return anonymousId;
   }
 
-  function promptReasonCode(action) {
+  function promptReason(action) {
     const prompt = action === 'skip' ? '跳过原因（可填代码，如 low_energy）' : '替换原因（可填代码，如 not_interested）';
     let value = 'other';
+    let detail = '';
     try {
       value = typeof window.prompt === 'function' ? window.prompt(prompt, 'other') : 'other';
     } catch (_) {
@@ -170,7 +179,21 @@
       'not_interested', 'low_energy', 'not_enough_time', 'over_budget',
       'location_inconvenient', 'too_difficult', 'not_matching_current_state', 'other',
     ]);
-    return allowed.has(value) ? value : 'other';
+    try {
+      detail = typeof window.prompt === 'function'
+        ? String(window.prompt('可补充一句原因说明（可选，最多 500 字）', '') || '')
+        : '';
+    } catch (_) {
+      detail = '';
+    }
+    return {
+      reason_code: allowed.has(value) ? value : 'other',
+      metadata: detail.trim() ? { reason_detail: detail.trim().slice(0, 500) } : {},
+    };
+  }
+
+  function promptReasonCode(action) {
+    return promptReason(action).reason_code;
   }
 
   const ADJUSTMENT_REASON_CODES = {
@@ -186,7 +209,7 @@
     return ADJUSTMENT_REASON_CODES[adjustment] || 'other';
   }
 
-  function reportRecommendationsViewed({ sessionId, planId, items, mode = null }) {
+  function reportRecommendationsViewed({ sessionId, planId, items, mode = null, energyLevel = null }) {
     const seen = new Set();
     const telemetryItems = typeof api.dedupeRecommendationTelemetryItems === 'function'
       ? api.dedupeRecommendationTelemetryItems(items)
@@ -202,9 +225,11 @@
         event_type: 'recommendations_viewed',
         session_id: sessionId ?? state.sessionId ?? null,
         plan_id: planId ?? state.plan?.plan_id ?? null,
-        metadata: mode === 'quick'
-          ? { mode: 'quick', task_category: item.category }
-          : { task_category: item.category, ...(mode ? { mode } : {}) },
+        metadata: {
+          task_category: item.category,
+          ...(mode ? { mode } : {}),
+          ...(energyLevel ? { energy_level: energyLevel } : {}),
+        },
         idempotency_key: `recommendations_viewed:${sessionId || state.sessionId || 'none'}:${planId || state.plan?.plan_id || 'none'}:${identity}`,
       });
     });
@@ -1346,6 +1371,7 @@
     state.step = 'result';
     reportRecommendationsViewed({
       planId: state.plan?.plan_id || null,
+      energyLevel: state.profile.energy_level,
       items: [
         ...(Array.isArray(state.recommendation?.tasks) ? state.recommendation.tasks : []),
         ...(Array.isArray(state.plan?.items) ? state.plan.items : []),
@@ -1615,13 +1641,14 @@
             metadata: { task_category: item?.category || null },
           });
         } else if (action === 'skip-execution') {
+          const reason = promptReason('skip');
           void reportTestEvent({
             event_type: 'task_skipped',
             action_id: actionId,
             plan_id: plan.plan_id,
             plan_item_id: itemId,
-            reason_code: promptReasonCode('skip'),
-            metadata: { task_category: item?.category || null },
+            reason_code: reason.reason_code,
+            metadata: { task_category: item?.category || null, ...reason.metadata },
           });
         }
         showToast(action === 'complete-execution' ? '任务已完成' : action === 'skip-execution' ? '任务已跳过，稍后可重新排程' : '已检查任务截止时间');
@@ -1767,13 +1794,14 @@
           expected_version: plan.version,
           user_id: state.userId,
         });
+        const reason = promptReason('replace');
         void reportTestEvent({
           event_type: 'task_replaced',
           action_id: actionId,
           plan_id: plan.plan_id,
           plan_item_id: control.dataset.itemId,
-          reason_code: promptReasonCode('replace'),
-          metadata: { task_category: item?.category || null },
+          reason_code: reason.reason_code,
+          metadata: { task_category: item?.category || null, ...reason.metadata },
         });
         showToast('已更换任务');
       });
@@ -1864,13 +1892,14 @@
         state.plan = await api.skipPlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
         });
+        const reason = promptReason('skip');
         void reportTestEvent({
           event_type: 'task_skipped',
           action_id: actionId,
           plan_id: plan.plan_id,
           plan_item_id: control.dataset.itemId,
-          reason_code: promptReasonCode('skip'),
-          metadata: { task_category: item?.category || null },
+          reason_code: reason.reason_code,
+          metadata: { task_category: item?.category || null, ...reason.metadata },
         });
       });
       return;
@@ -1950,6 +1979,7 @@
       reportRecommendationsViewed({
         sessionId: state.quickSessionId,
         mode: 'quick',
+        energyLevel: state.quickDraft.energy_level,
         items: [
           state.quickRun?.primary_task,
           ...(Array.isArray(state.quickRun?.alternatives) ? state.quickRun.alternatives : []),

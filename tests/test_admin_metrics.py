@@ -44,7 +44,31 @@ class ControlledConnection:
                 "replacement_count": 1,
                 "skip_count": 2,
             }],
+            "energy_recommendations": [{
+                "energy_level": "low",
+                "task_category": "study",
+                "recommendation_count": 3,
+                "average_rating": 4.0,
+                "replacement_count": 1,
+                "skip_count": 0,
+            }],
             "reasons": [{"reason_code": "low_energy", "count": 2}],
+            "reason_details": [{
+                "anonymous_id": "student_001",
+                "reason_code": "low_energy",
+                "detail": "今天精力有限",
+                "occurred_at": "2026-09-12T10:00:00+00:00",
+            }],
+            "user_detail": [{
+                "anonymous_id": "student_001",
+                "cohort": "student_2026_09",
+                "event_count": 6,
+                "session_count": 1,
+                "completed_count": 1,
+                "skipped_count": 1,
+                "replaced_count": 0,
+                "average_rating": 4.0,
+            }],
             "errors": [{"error_code": "timeout", "count": 1}],
         }
 
@@ -446,7 +470,10 @@ class AdminMetricsServiceTests(unittest.TestCase):
             }],
             "funnel": [],
             "recommendations": [],
+            "energy_recommendations": [],
             "reasons": [],
+            "reason_details": [],
+            "user_detail": [],
             "errors": [],
         }
         filters = MetricsFilters()
@@ -456,6 +483,48 @@ class AdminMetricsServiceTests(unittest.TestCase):
         self.assertEqual(self.service.recommendations(filters), [])
         self.assertEqual(self.service.reasons(filters), [])
         self.assertEqual(self.service.errors(filters), [])
+
+    def test_dashboard_exposes_energy_relationship_reason_details_and_anonymous_user_detail(self) -> None:
+        filters = MetricsFilters(anonymous_id="student_001")
+
+        self.assertEqual(
+            self.service.energy_recommendations(filters),
+            [{
+                "energy_level": "low",
+                "task_category": "study",
+                "recommendation_count": 3,
+                "average_rating": 4.0,
+                "replacement_rate": 33.33,
+                "skip_rate": 0.0,
+            }],
+        )
+        self.assertEqual(
+            self.service.reason_details(filters),
+            [{
+                "anonymous_id": "student_001",
+                "reason_code": "low_energy",
+                "detail": "今天精力有限",
+                "occurred_at": "2026-09-12T10:00:00+00:00",
+            }],
+        )
+        self.assertEqual(
+            self.service.user_detail(filters),
+            [{
+                "anonymous_id": "student_001",
+                "cohort": "student_2026_09",
+                "event_count": 6,
+                "session_count": 1,
+                "completed_count": 1,
+                "skipped_count": 1,
+                "replaced_count": 0,
+                "average_rating": 4.0,
+            }],
+        )
+
+        statements = [statement for statement, _ in self.connection.executions if "admin_metrics:" in statement]
+        self.assertTrue(any("admin_metrics:energy_recommendations" in statement for statement in statements))
+        self.assertTrue(any("admin_metrics:reason_details" in statement for statement in statements))
+        self.assertTrue(any("admin_metrics:user_detail" in statement for statement in statements))
 
 
 if __name__ == "__main__":

@@ -59,11 +59,11 @@ class FakeObservabilityService:
 
     def delete_anonymous_data(self, anonymous_id: str) -> int:
         self.deleted_anonymous_ids.append(anonymous_id)
-        return 1
+        return 0 if self.deleted_anonymous_ids.count(anonymous_id) > 1 else 1
 
     def delete_expired_data(self) -> int:
         self.cleanup_calls += 1
-        return 3
+        return 0 if self.cleanup_calls > 1 else 3
 
 
 class FakeAdminMetricsService:
@@ -105,6 +105,18 @@ class FakeAdminMetricsService:
         return []
 
     def errors(self, filters: object) -> list[dict[str, object]]:
+        self.filters.append(filters)
+        return []
+
+    def energy_recommendations(self, filters: object) -> list[dict[str, object]]:
+        self.filters.append(filters)
+        return []
+
+    def reason_details(self, filters: object) -> list[dict[str, object]]:
+        self.filters.append(filters)
+        return []
+
+    def user_detail(self, filters: object) -> list[dict[str, object]]:
         self.filters.append(filters)
         return []
 
@@ -356,6 +368,38 @@ class TestingApiTests(unittest.TestCase):
         self.assertEqual(observability.deleted_anonymous_ids, ["student_001"])
         self.assertEqual(observability.cleanup_calls, 1)
         self.assertEqual(admin_metrics.authenticated_tokens, ["invalid-token", "invalid-token", "valid-token", "valid-token"])
+        client.close()
+
+    def test_authenticated_deletion_rejects_invalid_ids_and_is_safe_to_repeat(self) -> None:
+        client, observability, _ = build_client()
+        headers = {"Authorization": "Bearer valid-token"}
+
+        invalid = client.delete("/api/v1/admin/test-users/not-a-student", headers=headers)
+        first_delete = client.delete("/api/v1/admin/test-users/student_001", headers=headers)
+        repeated_delete = client.delete("/api/v1/admin/test-users/student_001", headers=headers)
+        first_cleanup = client.post("/api/v1/admin/test-observations/cleanup", headers=headers)
+        repeated_cleanup = client.post("/api/v1/admin/test-observations/cleanup", headers=headers)
+
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(first_delete.json()["data"]["deleted"], 1)
+        self.assertEqual(repeated_delete.json()["data"]["deleted"], 0)
+        self.assertEqual(first_cleanup.json()["data"]["deleted_users"], 3)
+        self.assertEqual(repeated_cleanup.json()["data"]["deleted_users"], 0)
+        self.assertEqual(observability.deleted_anonymous_ids, ["student_001", "student_001"])
+        self.assertEqual(observability.cleanup_calls, 2)
+        client.close()
+
+    def test_authenticated_metric_detail_routes_apply_the_same_filters(self) -> None:
+        client, _, admin_metrics = build_client()
+        headers = {"Authorization": "Bearer valid-token"}
+        for path in ("energy-recommendations", "reason-details", "user-detail"):
+            response = client.get(
+                f"/api/v1/admin/metrics/{path}?anonymous_id=student_001",
+                headers=headers,
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(admin_metrics.filters), 3)
+        self.assertTrue(all(filter_value.anonymous_id == "student_001" for filter_value in admin_metrics.filters))
         client.close()
 
     def test_observation_failure_does_not_change_business_flow_or_crash_observation_route(self) -> None:

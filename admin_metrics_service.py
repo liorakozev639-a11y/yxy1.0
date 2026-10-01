@@ -488,6 +488,55 @@ class AdminMetricsService:
             for row in rows
         ]
 
+    def energy_recommendations(self, filters: MetricsFilters) -> list[dict[str, Any]]:
+        """Relate the reported energy level to recommended categories and outcomes."""
+        where, params = self._event_where(filters)
+        feedback_where, feedback_params = self._feedback_where(filters)
+        statement = f"""
+            /* admin_metrics:energy_recommendations */
+            WITH scoped_events AS (
+                SELECT
+                    e.plan_item_id,
+                    e.event_type,
+                    e.metadata_json ->> 'energy_level' AS energy_level,
+                    e.metadata_json ->> 'task_category' AS task_category
+                FROM test_events e
+                JOIN test_users u ON u.anonymous_id = e.anonymous_id
+                {where}
+            ), feedback_records AS (
+                SELECT DISTINCT ON (f.plan_item_id) f.plan_item_id, f.rating
+                FROM task_test_feedback f
+                JOIN test_users u ON u.anonymous_id = f.anonymous_id
+                {feedback_where}
+                ORDER BY f.plan_item_id, f.created_at DESC, f.id DESC
+            )
+            SELECT
+                COALESCE(e.energy_level, 'unknown') AS energy_level,
+                COALESCE(e.task_category, 'unknown') AS task_category,
+                COUNT(*) FILTER (WHERE e.event_type = 'recommendations_viewed') AS recommendation_count,
+                AVG(f.rating) FILTER (WHERE e.event_type = 'recommendations_viewed') AS average_rating,
+                COUNT(*) FILTER (WHERE e.event_type = 'task_replaced') AS replacement_count,
+                COUNT(*) FILTER (WHERE e.event_type = 'task_skipped') AS skip_count
+            FROM scoped_events e
+            LEFT JOIN feedback_records f ON f.plan_item_id = e.plan_item_id
+            WHERE e.energy_level IS NOT NULL
+            GROUP BY e.energy_level, e.task_category
+            ORDER BY e.energy_level ASC, e.task_category ASC
+        """
+        with self._connect() as connection:
+            rows = connection.execute(statement, params + feedback_params).fetchall()
+        return [
+            {
+                "energy_level": row["energy_level"],
+                "task_category": row["task_category"],
+                "recommendation_count": int(row["recommendation_count"] or 0),
+                "average_rating": round(float(row["average_rating"] or 0), 2),
+                "replacement_rate": self._rate(row["replacement_count"], row["recommendation_count"]),
+                "skip_rate": self._rate(row["skip_count"], row["recommendation_count"]),
+            }
+            for row in rows
+        ]
+
     def reasons(self, filters: MetricsFilters) -> list[dict[str, Any]]:
         where, params = self._event_where(filters)
         statement = f"""
@@ -503,6 +552,36 @@ class AdminMetricsService:
         with self._connect() as connection:
             rows = connection.execute(statement, params).fetchall()
         return [{"reason_code": row["reason_code"], "count": int(row["count"])} for row in rows]
+
+    def reason_details(self, filters: MetricsFilters) -> list[dict[str, Any]]:
+        """Return bounded anonymous explanations, without personal identity fields."""
+        where, params = self._event_where(filters)
+        statement = f"""
+            /* admin_metrics:reason_details */
+            SELECT
+                e.anonymous_id,
+                e.reason_code,
+                LEFT(e.metadata_json ->> 'reason_detail', 500) AS detail,
+                e.occurred_at
+            FROM test_events e
+            JOIN test_users u ON u.anonymous_id = e.anonymous_id
+            {where}
+              {'AND' if where else 'WHERE'} e.reason_code IS NOT NULL
+              AND NULLIF(BTRIM(e.metadata_json ->> 'reason_detail'), '') IS NOT NULL
+            ORDER BY occurred_at DESC
+            LIMIT 100
+        """
+        with self._connect() as connection:
+            rows = connection.execute(statement, params).fetchall()
+        return [
+            {
+                "anonymous_id": row["anonymous_id"],
+                "reason_code": row["reason_code"],
+                "detail": str(row["detail"] or "")[:500],
+                "occurred_at": row["occurred_at"],
+            }
+            for row in rows
+        ]
 
     def errors(self, filters: MetricsFilters) -> list[dict[str, Any]]:
         where, params = self._event_where(filters)
@@ -520,3 +599,67 @@ class AdminMetricsService:
         with self._connect() as connection:
             rows = connection.execute(statement, params).fetchall()
         return [{"error_code": row["error_code"] or "unknown", "count": int(row["count"])} for row in rows]
+
+    def user_detail(self, filters: MetricsFilters) -> list[dict[str, Any]]:
+        """Return anonymous per-user behavior totals for an optional anonymous_id filter."""
+        where, params = self._event_where(filters)
+        feedback_where, feedback_params = self._feedback_where(filters)
+        user_clauses: list[str] = []
+        user_params: list[object] = []
+        if filters.cohort:
+            user_clauses.append("u.cohort = %s")
+            user_params.append(filters.cohort)
+        if filters.anonymous_id:
+            user_clauses.append("u.anonymous_id = %s")
+            user_params.append(filters.anonymous_id)
+        if filters.from_date or filters.to_date or filters.task_category:
+            user_clauses.append(
+                "(EXISTS (SELECT 1 FROM scoped_events scoped_user_event "
+                "WHERE scoped_user_event.anonymous_id = u.anonymous_id) "
+                "OR EXISTS (SELECT 1 FROM scoped_feedback scoped_user_feedback "
+                "WHERE scoped_user_feedback.anonymous_id = u.anonymous_id))"
+            )
+        user_where = " WHERE " + " AND ".join(user_clauses) if user_clauses else ""
+        statement = f"""
+            /* admin_metrics:user_detail */
+            WITH scoped_events AS (
+                SELECT e.anonymous_id, e.session_id, e.event_type
+                FROM test_events e
+                JOIN test_users u ON u.anonymous_id = e.anonymous_id
+                {where}
+            ), scoped_feedback AS (
+                SELECT f.anonymous_id, f.rating
+                FROM task_test_feedback f
+                JOIN test_users u ON u.anonymous_id = f.anonymous_id
+                {feedback_where}
+            )
+            SELECT
+                u.anonymous_id,
+                u.cohort,
+                COUNT(e.anonymous_id) AS event_count,
+                COUNT(DISTINCT e.session_id) AS session_count,
+                COUNT(*) FILTER (WHERE e.event_type = 'task_completed') AS completed_count,
+                COUNT(*) FILTER (WHERE e.event_type = 'task_skipped') AS skipped_count,
+                COUNT(*) FILTER (WHERE e.event_type = 'task_replaced') AS replaced_count,
+                (SELECT AVG(f.rating) FROM scoped_feedback f WHERE f.anonymous_id = u.anonymous_id) AS average_rating
+            FROM test_users u
+            LEFT JOIN scoped_events e ON e.anonymous_id = u.anonymous_id
+            {user_where}
+            GROUP BY u.anonymous_id, u.cohort
+            ORDER BY u.anonymous_id ASC
+        """
+        with self._connect() as connection:
+            rows = connection.execute(statement, params + feedback_params + tuple(user_params)).fetchall()
+        return [
+            {
+                "anonymous_id": row["anonymous_id"],
+                "cohort": row["cohort"],
+                "event_count": int(row["event_count"] or 0),
+                "session_count": int(row["session_count"] or 0),
+                "completed_count": int(row["completed_count"] or 0),
+                "skipped_count": int(row["skipped_count"] or 0),
+                "replaced_count": int(row["replaced_count"] or 0),
+                "average_rating": round(float(row["average_rating"] or 0), 2),
+            }
+            for row in rows
+        ]
