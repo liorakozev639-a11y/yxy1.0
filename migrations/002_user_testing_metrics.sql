@@ -71,19 +71,9 @@ CREATE TABLE IF NOT EXISTS admin_users (
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role = 'admin'),
-    failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_count >= 0),
-    locked_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-ALTER TABLE IF EXISTS admin_users
-ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_count >= 0);
-ALTER TABLE IF EXISTS admin_users
-ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_single_admin
-ON admin_users(role) WHERE role = 'admin';
 
 CREATE TABLE IF NOT EXISTS admin_sessions (
     id TEXT PRIMARY KEY,

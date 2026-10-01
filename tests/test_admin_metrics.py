@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 import os
 import unittest
@@ -15,6 +16,10 @@ class ControlledConnection:
         self.executions: list[tuple[str, tuple[object, ...] | None]] = []
         self.users: dict[str, dict[str, object]] = {}
         self.sessions: dict[str, dict[str, object]] = {}
+        self._transaction_users: dict[str, dict[str, object]] | None = None
+        self._transaction_sessions: dict[str, dict[str, object]] | None = None
+        self.commits = 0
+        self.rollbacks = 0
         self._row: dict[str, object] | None = None
         self._rows: list[dict[str, object]] = []
         self.rowcount = 0
@@ -44,10 +49,28 @@ class ControlledConnection:
         }
 
     def __enter__(self):
+        self._transaction_users = deepcopy(self.users)
+        self._transaction_sessions = deepcopy(self.sessions)
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
+        if exc_type is None:
+            self.users = self._transaction_users or {}
+            self.sessions = self._transaction_sessions or {}
+            self.commits += 1
+        else:
+            self.rollbacks += 1
+        self._transaction_users = None
+        self._transaction_sessions = None
         return None
+
+    @property
+    def _active_users(self) -> dict[str, dict[str, object]]:
+        return self._transaction_users if self._transaction_users is not None else self.users
+
+    @property
+    def _active_sessions(self) -> dict[str, dict[str, object]]:
+        return self._transaction_sessions if self._transaction_sessions is not None else self.sessions
 
     def execute(self, statement: str, params=None):
         statement = str(statement)
@@ -57,10 +80,10 @@ class ControlledConnection:
         self.rowcount = 0
 
         if "WHERE role = 'admin'" in statement and "FROM admin_users" in statement:
-            self._row = next((dict(user) for user in self.users.values()), None)
+            self._row = next((dict(user) for user in self._active_users.values()), None)
         elif "INSERT INTO admin_users" in statement:
             admin_id, username, password_hash = params
-            self.users.setdefault(username, {
+            self._active_users.setdefault(username, {
                 "id": admin_id,
                 "username": username,
                 "password_hash": password_hash,
@@ -70,7 +93,7 @@ class ControlledConnection:
             })
         elif "UPDATE admin_users SET failed_login_count = failed_login_count + 1" in statement:
             max_failures, locked_until, now, admin_id = params
-            user = next(user for user in self.users.values() if user["id"] == admin_id)
+            user = next(user for user in self._active_users.values() if user["id"] == admin_id)
             user["failed_login_count"] = int(user["failed_login_count"]) + 1
             if user["failed_login_count"] >= max_failures:
                 user["locked_until"] = locked_until
@@ -80,15 +103,15 @@ class ControlledConnection:
             }
         elif "UPDATE admin_users SET failed_login_count = 0" in statement:
             now, admin_id = params[:2]
-            user = next(user for user in self.users.values() if user["id"] == admin_id)
+            user = next(user for user in self._active_users.values() if user["id"] == admin_id)
             user["failed_login_count"] = 0
             user["locked_until"] = None
         elif "FROM admin_users" in statement:
-            user = self.users.get(params[0])
+            user = self._active_users.get(params[0])
             self._row = dict(user) if user else None
         elif "INSERT INTO admin_sessions" in statement:
             session_id, admin_user_id, token_hash, expires_at = params
-            self.sessions[token_hash] = {
+            self._active_sessions[token_hash] = {
                 "id": session_id,
                 "admin_user_id": admin_user_id,
                 "token_hash": token_hash,
@@ -97,16 +120,16 @@ class ControlledConnection:
             }
         elif "UPDATE admin_sessions SET revoked_at" in statement:
             token_hash = params[1]
-            session = self.sessions.get(token_hash)
+            session = self._active_sessions.get(token_hash)
             if session and session["revoked_at"] is None:
                 session["revoked_at"] = params[0]
                 self.rowcount = 1
         elif "FROM admin_sessions" in statement:
             token_hash, now = params
-            session = self.sessions.get(token_hash)
+            session = self._active_sessions.get(token_hash)
             if session and session["revoked_at"] is None and session["expires_at"] > now:
                 user = next(
-                    user for user in self.users.values()
+                    user for user in self._active_users.values()
                     if user["id"] == session["admin_user_id"]
                 )
                 self._row = {"id": user["id"], "username": user["username"], "role": "admin"}
@@ -185,6 +208,8 @@ class AdminMetricsServiceTests(unittest.TestCase):
         admin = self.connection.users["metrics_admin"]
         self.assertEqual(admin["failed_login_count"], self.service.MAX_FAILED_LOGINS)
         self.assertIsNotNone(admin["locked_until"])
+        self.assertEqual(self.connection.rollbacks, 0)
+        self.assertEqual(self.connection.commits, self.service.MAX_FAILED_LOGINS + 1)
 
     def test_non_ascii_username_returns_uniform_login_failure(self) -> None:
         with self.assertRaisesRegex(PermissionError, "^登录失败$"):
@@ -316,6 +341,43 @@ class AdminMetricsServiceTests(unittest.TestCase):
         self.assertIn("feedback_totals AS", statement)
         self.assertNotIn("LEFT JOIN scoped_feedback f ON f.plan_item_id = e.plan_item_id", statement)
 
+    def test_summary_uses_session_created_and_feedback_submitted_for_full_flow(self) -> None:
+        self.connection.metric_rows["summary"][0].update(
+            {"session_count": 2, "completed_sessions": 1}
+        )
+
+        self.assertEqual(self.service.summary(MetricsFilters())["full_flow_success_rate"], 50.0)
+        statement = next(
+            statement
+            for statement, _ in self.connection.executions
+            if "admin_metrics:summary" in statement
+        )
+        self.assertIn("e.event_type = 'session_created'", statement)
+        self.assertIn("e.event_type = 'feedback_submitted'", statement)
+
+    def test_feedback_ratings_are_scoped_by_feedback_created_at(self) -> None:
+        filters = MetricsFilters(from_date=date(2026, 9, 1), to_date=date(2026, 9, 30))
+
+        self.service.summary(filters)
+        self.service.recommendations(filters)
+
+        for statement, params in (
+            (statement, params)
+            for statement, params in self.connection.executions
+            if "admin_metrics:summary" in statement or "admin_metrics:recommendations" in statement
+        ):
+            self.assertIn("f.created_at >= %s", statement)
+            self.assertIn("f.created_at < %s", statement)
+            self.assertEqual(
+                params,
+                (
+                    datetime(2026, 9, 1, tzinfo=timezone.utc),
+                    datetime(2026, 10, 1, tzinfo=timezone.utc),
+                    datetime(2026, 9, 1, tzinfo=timezone.utc),
+                    datetime(2026, 10, 1, tzinfo=timezone.utc),
+                ),
+            )
+
     def test_recommendation_rating_uses_each_plan_item_once_when_event_counts_differ(self) -> None:
         # Uneven event volumes must not change the category's two feedback samples (1 and 5).
         event_counts = {"item-a": 9, "item-b": 1}
@@ -342,6 +404,7 @@ class AdminMetricsServiceTests(unittest.TestCase):
         )
         self.assertIn("feedback_by_category AS", statement)
         self.assertIn("SELECT DISTINCT task_category, plan_item_id", statement)
+        self.assertIn("SELECT DISTINCT f.plan_item_id, f.rating", statement)
         self.assertNotIn("LEFT JOIN task_test_feedback f ON f.plan_item_id = e.plan_item_id", statement)
 
     def test_empty_metrics_are_zero_or_empty(self) -> None:
