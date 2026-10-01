@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import date, datetime
+import logging
 from typing import Any, Literal, Optional
 
 import psycopg
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +40,10 @@ from user_history_service import UserHistoryService
 from candidate_provider import TaskBankProvider
 from quick_recommendation_service import QuickRecommendationService
 from database_migrations import run_migrations
+from admin_metrics_service import AdminMetricsService, MetricsFilters
+from test_observability import TestObservabilityService
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
@@ -165,6 +170,58 @@ class QuickFeedbackInput(BaseModel):
     task_id: str | None = None
 
 
+class TestUserIdentifyInput(BaseModel):
+    anonymous_id: str = Field(min_length=1, max_length=64)
+    cohort: str = Field(min_length=1, max_length=64)
+
+
+class TestEventInput(BaseModel):
+    anonymous_id: str = Field(min_length=1, max_length=64)
+    event_type: Literal[
+        "session_created",
+        "questionnaire_started",
+        "questionnaire_completed",
+        "recommendations_viewed",
+        "task_started",
+        "task_completed",
+        "task_skipped",
+        "task_replaced",
+        "schedule_adjusted",
+        "feedback_submitted",
+        "flow_error",
+    ]
+    session_id: Optional[str] = Field(default=None, max_length=128)
+    plan_id: Optional[str] = Field(default=None, max_length=128)
+    plan_item_id: Optional[str] = Field(default=None, max_length=128)
+    reason_code: Optional[
+        Literal[
+            "not_interested",
+            "low_energy",
+            "not_enough_time",
+            "over_budget",
+            "location_inconvenient",
+            "too_difficult",
+            "not_matching_current_state",
+            "other",
+        ]
+    ] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+class TestFeedbackInput(BaseModel):
+    anonymous_id: str = Field(min_length=1, max_length=64)
+    session_id: str = Field(min_length=1, max_length=128)
+    plan_item_id: str = Field(min_length=1, max_length=128)
+    rating: int = Field(ge=1, le=5)
+    comment: Optional[str] = Field(default=None, max_length=500)
+
+
+class AdminLoginInput(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
+
+
 def success(data: Any) -> dict[str, Any]:
     """
 
@@ -256,6 +313,8 @@ def create_app(
     user_history: Optional[UserHistoryService] = None,
     history_insight: Optional[HistoryInsightService] = None,
     quick_service: Optional[QuickRecommendationService] = None,
+    test_observability_service: Optional[TestObservabilityService] = None,
+    admin_metrics_service: Optional[AdminMetricsService] = None,
 ) -> FastAPI:
     if (session_service is None) != (questionnaire_service is None):
         raise ValueError("必须同时提供 Session 和 Questionnaire 服务")
@@ -294,6 +353,13 @@ def create_app(
             user_history.quick_store,
             user_history,
         )
+    if test_observability_service is None and database_url:
+        test_observability_service = TestObservabilityService(database_url)
+    if admin_metrics_service is None and database_url:
+        try:
+            admin_metrics_service = AdminMetricsService(database_url)
+        except ValueError:
+            logger.info("admin metrics service is not configured")
     if orchestrator is None:
         orchestrator = build_orchestrator(
             session_service,
@@ -359,7 +425,7 @@ def create_app(
         allow_origins=ALLOWED_ORIGINS,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     @app.exception_handler(HTTPException)
@@ -428,6 +494,144 @@ def create_app(
         except psycopg.Error as exc:
             raise HTTPException(status_code=503, detail="数据库暂时不可用") from exc
         return success({"status": "ok", "service": "postgresql"})
+
+    def observe(operation, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return success(operation(*args, **kwargs))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception:
+            logger.warning("test observation write failed")
+            return success({"recorded": False})
+
+    def require_observability_service() -> TestObservabilityService:
+        if test_observability_service is None:
+            raise HTTPException(status_code=503, detail="测试观测服务未配置")
+        return test_observability_service
+
+    def require_admin_service() -> AdminMetricsService:
+        if admin_metrics_service is None:
+            raise HTTPException(status_code=503, detail="管理员指标服务未配置")
+        return admin_metrics_service
+
+    def admin_token(authorization: Optional[str]) -> str:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="未认证")
+        token = authorization[7:].strip()
+        if not token:
+            raise HTTPException(status_code=401, detail="未认证")
+        return token
+
+    def require_admin(authorization: Optional[str]) -> tuple[str, dict[str, Any]]:
+        token = admin_token(authorization)
+        try:
+            identity = require_admin_service().authenticate(token)
+        except PermissionError as exc:
+            raise HTTPException(status_code=401, detail="未认证") from exc
+        return token, identity
+
+    def metrics_filters(
+        from_date: Optional[date] = Query(default=None, alias="from"),
+        to_date: Optional[date] = Query(default=None, alias="to"),
+        cohort: Optional[str] = Query(default=None, max_length=64),
+        anonymous_id: Optional[str] = Query(default=None, max_length=64),
+        task_category: Optional[str] = Query(default=None, max_length=64),
+    ) -> MetricsFilters:
+        try:
+            return MetricsFilters(
+                from_date=from_date,
+                to_date=to_date,
+                cohort=cohort,
+                anonymous_id=anonymous_id,
+                task_category=task_category,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/test-users/identify")
+    def identify_test_user(body: TestUserIdentifyInput) -> dict[str, Any]:
+        return observe(
+            require_observability_service().identify,
+            body.anonymous_id,
+            body.cohort,
+        )
+
+    @app.post("/api/v1/test-events")
+    def record_test_event(body: TestEventInput) -> dict[str, Any]:
+        return observe(
+            require_observability_service().record_event,
+            **body.model_dump(),
+        )
+
+    @app.post("/api/v1/test-feedback")
+    def save_test_feedback(body: TestFeedbackInput) -> dict[str, Any]:
+        return observe(
+            require_observability_service().save_feedback,
+            **body.model_dump(),
+        )
+
+    @app.post("/api/v1/admin/login")
+    def admin_login(body: AdminLoginInput) -> dict[str, Any]:
+        try:
+            result = require_admin_service().login(body.username, body.password)
+        except PermissionError as exc:
+            raise HTTPException(status_code=401, detail="登录失败") from exc
+        return success(result)
+
+    @app.post("/api/v1/admin/logout")
+    def admin_logout(
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        token, _ = require_admin(authorization)
+        require_admin_service().logout(token)
+        return success({"logged_out": True})
+
+    @app.get("/api/v1/admin/me")
+    def admin_me(
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        _, identity = require_admin(authorization)
+        return success(identity)
+
+    @app.get("/api/v1/admin/metrics/summary")
+    def admin_metrics_summary(
+        filters: MetricsFilters = Depends(metrics_filters),
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(authorization)
+        return success(require_admin_service().summary(filters))
+
+    @app.get("/api/v1/admin/metrics/funnel")
+    def admin_metrics_funnel(
+        filters: MetricsFilters = Depends(metrics_filters),
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(authorization)
+        return success(require_admin_service().funnel(filters))
+
+    @app.get("/api/v1/admin/metrics/recommendations")
+    def admin_metrics_recommendations(
+        filters: MetricsFilters = Depends(metrics_filters),
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(authorization)
+        return success(require_admin_service().recommendations(filters))
+
+    @app.get("/api/v1/admin/metrics/reasons")
+    def admin_metrics_reasons(
+        filters: MetricsFilters = Depends(metrics_filters),
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(authorization)
+        return success(require_admin_service().reasons(filters))
+
+    @app.get("/api/v1/admin/metrics/errors")
+    def admin_metrics_errors(
+        filters: MetricsFilters = Depends(metrics_filters),
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(authorization)
+        return success(require_admin_service().errors(filters))
 
     @app.post("/api/v1/sessions", status_code=201)
     def create_session() -> dict[str, Any]:
