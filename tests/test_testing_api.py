@@ -203,6 +203,27 @@ class TestingApiTests(unittest.TestCase):
         self.assertEqual(invalid_event.status_code, 422)
         client.close()
 
+    def test_rating_rejects_float_and_numeric_string_coercion(self) -> None:
+        client, _, _ = build_client()
+        payload = {
+            "anonymous_id": "student_001",
+            "session_id": "session_001",
+            "plan_item_id": "item_001",
+        }
+
+        float_rating = client.post(
+            "/api/v1/test-feedback",
+            json={**payload, "rating": 5.0},
+        )
+        string_rating = client.post(
+            "/api/v1/test-feedback",
+            json={**payload, "rating": "5"},
+        )
+
+        self.assertEqual(float_rating.status_code, 422)
+        self.assertEqual(string_rating.status_code, 422)
+        client.close()
+
     def test_duplicate_event_keeps_service_idempotency_result(self) -> None:
         client, observability, _ = build_client()
         payload = {
@@ -270,6 +291,27 @@ class TestingApiTests(unittest.TestCase):
         self.assertEqual(admin_metrics.filters[0].anonymous_id, "student_001")
         self.assertEqual(logged_out.status_code, 200, logged_out.text)
         self.assertEqual(admin_metrics.logged_out_tokens, ["valid-token"])
+        after_logout = client.get(
+            "/api/v1/admin/metrics/summary",
+            headers=headers,
+        )
+        self.assertEqual(after_logout.status_code, 401, after_logout.text)
+        client.close()
+
+    def test_unauthenticated_metrics_reject_invalid_filters_before_parsing(self) -> None:
+        client, _, _ = build_client()
+
+        unauthenticated = client.get(
+            "/api/v1/admin/metrics/summary?from=not-a-date",
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        authenticated = client.get(
+            "/api/v1/admin/metrics/summary?from=not-a-date",
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+        self.assertEqual(unauthenticated.status_code, 401, unauthenticated.text)
+        self.assertEqual(authenticated.status_code, 422, authenticated.text)
         client.close()
 
     def test_observation_failure_does_not_change_business_flow_or_crash_observation_route(self) -> None:

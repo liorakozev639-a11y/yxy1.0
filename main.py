@@ -13,7 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 from questionnaire_module import (
     PostgresQuestionnaireRepository,
@@ -213,7 +213,7 @@ class TestFeedbackInput(BaseModel):
     anonymous_id: str = Field(min_length=1, max_length=64)
     session_id: str = Field(min_length=1, max_length=128)
     plan_item_id: str = Field(min_length=1, max_length=128)
-    rating: int = Field(ge=1, le=5)
+    rating: StrictInt = Field(ge=1, le=5)
     comment: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -530,6 +530,11 @@ def create_app(
             raise HTTPException(status_code=401, detail="未认证") from exc
         return token, identity
 
+    def require_admin_dependency(
+        authorization: Optional[str] = Header(default=None),
+    ) -> tuple[str, dict[str, Any]]:
+        return require_admin(authorization)
+
     def metrics_filters(
         from_date: Optional[date] = Query(default=None, alias="from"),
         to_date: Optional[date] = Query(default=None, alias="to"),
@@ -595,42 +600,37 @@ def create_app(
 
     @app.get("/api/v1/admin/metrics/summary")
     def admin_metrics_summary(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
         filters: MetricsFilters = Depends(metrics_filters),
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        require_admin(authorization)
         return success(require_admin_service().summary(filters))
 
     @app.get("/api/v1/admin/metrics/funnel")
     def admin_metrics_funnel(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
         filters: MetricsFilters = Depends(metrics_filters),
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        require_admin(authorization)
         return success(require_admin_service().funnel(filters))
 
     @app.get("/api/v1/admin/metrics/recommendations")
     def admin_metrics_recommendations(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
         filters: MetricsFilters = Depends(metrics_filters),
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        require_admin(authorization)
         return success(require_admin_service().recommendations(filters))
 
     @app.get("/api/v1/admin/metrics/reasons")
     def admin_metrics_reasons(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
         filters: MetricsFilters = Depends(metrics_filters),
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        require_admin(authorization)
         return success(require_admin_service().reasons(filters))
 
     @app.get("/api/v1/admin/metrics/errors")
     def admin_metrics_errors(
+        _: tuple[str, dict[str, Any]] = Depends(require_admin_dependency),
         filters: MetricsFilters = Depends(metrics_filters),
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        require_admin(authorization)
         return success(require_admin_service().errors(filters))
 
     @app.post("/api/v1/sessions", status_code=201)

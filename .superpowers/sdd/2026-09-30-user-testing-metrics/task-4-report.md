@@ -48,4 +48,24 @@ The repository does not expose a `python` executable in this environment, so the
 
 ## Commit
 
-Pending the focused Task 4 commit.
+- Original implementation commit: `d6cc7da` (`feat: expose testing telemetry and admin metrics api`).
+- Review-fix commit: committed as the current follow-up commit on this branch (`fix: address task 4 api review findings`); no pending Task 4 changes remain.
+
+## Review Fixes
+
+- Metrics routes now declare an authentication dependency before the metrics-filter dependency, so missing or invalid bearer tokens return 401 before invalid query dates are parsed. Authenticated invalid filters continue to return FastAPI validation 422 responses.
+- `TestFeedbackInput.rating` now uses Pydantic `StrictInt`, rejecting JSON `5.0` and `"5"` instead of coercing either value to integer 5.
+- The API test suite now verifies that a token is rejected by a protected metrics endpoint after logout.
+
+## Review Fix Verification
+
+- RED: `uv --cache-dir .uv-cache run --offline python -m unittest tests.test_testing_api -v`
+  - 2 expected failures reproduced: coerced rating and 422-before-auth behavior.
+- PASS: `uv --cache-dir .uv-cache run --offline python -m unittest tests.test_testing_api -v`
+  - 9 tests passed after the fixes.
+- PASS: `uv --cache-dir .uv-cache run --offline python -m unittest tests.test_testing_api tests.test_test_observability tests.test_admin_metrics tests.test_database_migrations -v`
+  - 37 tests passed.
+- PASS: `uv --cache-dir .uv-cache run --offline python -m py_compile main.py tests\\test_testing_api.py`
+  - Exit code 0.
+- PASS: `git diff --check`
+  - Exit code 0.
