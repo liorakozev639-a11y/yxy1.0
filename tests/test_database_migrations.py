@@ -112,6 +112,13 @@ class DatabaseMigrationTests(unittest.TestCase):
         )
         self.assertIn("UNIQUE (idempotency_key)", sql)
         self.assertIn("UNIQUE (plan_item_id)", sql)
+        self.assertIn("failed_login_count INTEGER NOT NULL DEFAULT 0", sql)
+        self.assertIn("locked_until TIMESTAMPTZ", sql)
+        self.assertIn("ALTER TABLE IF EXISTS admin_users", sql)
+        self.assertIn("ADD COLUMN IF NOT EXISTS failed_login_count", sql)
+        self.assertIn("ADD COLUMN IF NOT EXISTS locked_until", sql)
+        self.assertIn("CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_single_admin", sql)
+        self.assertIn("ON admin_users(role) WHERE role = 'admin'", sql)
 
         expected_indexes = {
             "idx_test_users_cohort": "ON test_users(cohort)",
@@ -140,11 +147,13 @@ class DatabaseMigrationTests(unittest.TestCase):
         )
         statements = list(_statements(migration.read_text(encoding="utf-8")))
 
-        self.assertEqual(len(statements), 10)
+        self.assertEqual(len(statements), 13)
         for statement in statements:
             self.assertTrue(
                 statement.startswith("CREATE TABLE IF NOT EXISTS")
-                or statement.startswith("CREATE INDEX IF NOT EXISTS"),
+                or statement.startswith("CREATE INDEX IF NOT EXISTS")
+                or statement.startswith("CREATE UNIQUE INDEX IF NOT EXISTS")
+                or statement.startswith("ALTER TABLE IF EXISTS"),
                 statement,
             )
 

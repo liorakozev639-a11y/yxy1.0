@@ -65,7 +65,24 @@ class ControlledConnection:
                 "username": username,
                 "password_hash": password_hash,
                 "role": "admin",
+                "failed_login_count": 0,
+                "locked_until": None,
             })
+        elif "UPDATE admin_users SET failed_login_count = failed_login_count + 1" in statement:
+            max_failures, locked_until, now, admin_id = params
+            user = next(user for user in self.users.values() if user["id"] == admin_id)
+            user["failed_login_count"] = int(user["failed_login_count"]) + 1
+            if user["failed_login_count"] >= max_failures:
+                user["locked_until"] = locked_until
+            self._row = {
+                "failed_login_count": user["failed_login_count"],
+                "locked_until": user["locked_until"],
+            }
+        elif "UPDATE admin_users SET failed_login_count = 0" in statement:
+            now, admin_id = params[:2]
+            user = next(user for user in self.users.values() if user["id"] == admin_id)
+            user["failed_login_count"] = 0
+            user["locked_until"] = None
         elif "FROM admin_users" in statement:
             user = self.users.get(params[0])
             self._row = dict(user) if user else None
@@ -142,6 +159,7 @@ class AdminMetricsServiceTests(unittest.TestCase):
         statements = "\n".join(statement for statement, _ in self.connection.executions)
         self.assertNotIn("correct horse battery staple", statements)
         self.assertNotIn(result["token"], statements)
+        self.assertIn("pg_advisory_xact_lock", statements)
 
     def test_login_failure_is_uniform_and_limited(self) -> None:
         for username, password in (("metrics_admin", "wrong"), ("unknown", "wrong")):
@@ -154,6 +172,23 @@ class AdminMetricsServiceTests(unittest.TestCase):
                 self.service.login("metrics_admin", "wrong")
         with self.assertRaisesRegex(PermissionError, "登录失败"):
             self.service.login("metrics_admin", "correct horse battery staple")
+
+    def test_login_lockout_persists_across_service_instances(self) -> None:
+        for _ in range(self.service.MAX_FAILED_LOGINS):
+            with self.assertRaisesRegex(PermissionError, "登录失败"):
+                self.service.login("metrics_admin", "wrong")
+
+        replacement = AdminMetricsService("postgresql://controlled-test")
+        with self.assertRaisesRegex(PermissionError, "登录失败"):
+            replacement.login("metrics_admin", "correct horse battery staple")
+
+        admin = self.connection.users["metrics_admin"]
+        self.assertEqual(admin["failed_login_count"], self.service.MAX_FAILED_LOGINS)
+        self.assertIsNotNone(admin["locked_until"])
+
+    def test_non_ascii_username_returns_uniform_login_failure(self) -> None:
+        with self.assertRaisesRegex(PermissionError, "^登录失败$"):
+            self.service.login("管理员", "wrong")
 
     def test_initialization_refuses_a_second_admin_when_environment_changes(self) -> None:
         self.service.login("metrics_admin", "correct horse battery staple")
@@ -242,6 +277,72 @@ class AdminMetricsServiceTests(unittest.TestCase):
             self.assertIn("student_2026_09", params)
             self.assertIn("student_001", params)
             self.assertIn("study", params)
+
+        funnel_statement, funnel_params = next(
+            (statement, params)
+            for statement, params in metric_executions
+            if "admin_metrics:funnel" in statement
+        )
+        self.assertIn("e.event_type = ANY(%s)", funnel_statement)
+        self.assertIsInstance(funnel_params[-1], list)
+        self.assertEqual(
+            funnel_params[-1],
+            [
+                "session_created",
+                "questionnaire_completed",
+                "recommendations_viewed",
+                "task_started",
+                "task_completed",
+                "feedback_submitted",
+            ],
+        )
+
+    def test_summary_rating_uses_each_plan_item_once_when_event_counts_differ(self) -> None:
+        # Seven events for item-a and one for item-b must not turn ratings 1 and 5 into 1.5.
+        event_counts = {"item-a": 7, "item-b": 1}
+        ratings = {"item-a": 1, "item-b": 5}
+        expected_average = sum(ratings.values()) / len(ratings)
+        weighted_average = sum(event_counts[item] * ratings[item] for item in ratings) / sum(event_counts.values())
+        self.assertNotEqual(weighted_average, expected_average)
+        self.connection.metric_rows["summary"][0]["average_rating"] = expected_average
+
+        self.assertEqual(self.service.summary(MetricsFilters())["average_rating"], expected_average)
+        statement = next(
+            statement
+            for statement, _ in self.connection.executions
+            if "admin_metrics:summary" in statement
+        )
+        self.assertIn("SELECT DISTINCT e.plan_item_id", statement)
+        self.assertIn("feedback_totals AS", statement)
+        self.assertNotIn("LEFT JOIN scoped_feedback f ON f.plan_item_id = e.plan_item_id", statement)
+
+    def test_recommendation_rating_uses_each_plan_item_once_when_event_counts_differ(self) -> None:
+        # Uneven event volumes must not change the category's two feedback samples (1 and 5).
+        event_counts = {"item-a": 9, "item-b": 1}
+        ratings = {"item-a": 1, "item-b": 5}
+        expected_average = sum(ratings.values()) / len(ratings)
+        weighted_average = sum(event_counts[item] * ratings[item] for item in ratings) / sum(event_counts.values())
+        self.assertNotEqual(weighted_average, expected_average)
+        self.connection.metric_rows["recommendations"] = [{
+            "task_category": "study",
+            "recommendation_count": 10,
+            "average_rating": expected_average,
+            "replacement_count": 0,
+            "skip_count": 0,
+        }]
+
+        self.assertEqual(
+            self.service.recommendations(MetricsFilters())[0]["average_rating"],
+            expected_average,
+        )
+        statement = next(
+            statement
+            for statement, _ in self.connection.executions
+            if "admin_metrics:recommendations" in statement
+        )
+        self.assertIn("feedback_by_category AS", statement)
+        self.assertIn("SELECT DISTINCT task_category, plan_item_id", statement)
+        self.assertNotIn("LEFT JOIN task_test_feedback f ON f.plan_item_id = e.plan_item_id", statement)
 
     def test_empty_metrics_are_zero_or_empty(self) -> None:
         self.connection.metric_rows = {

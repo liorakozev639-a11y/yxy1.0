@@ -74,8 +74,6 @@ class AdminMetricsService:
         self.password = os.environ.get("ADMIN_METRICS_PASSWORD", "")
         if not self.username or not self.password:
             raise ValueError("ADMIN_METRICS_USERNAME 和 ADMIN_METRICS_PASSWORD 必须配置")
-        self._failed_logins = 0
-        self._locked_until: datetime | None = None
 
     def _connect(self):
         return psycopg.connect(self.database_url, row_factory=dict_row)
@@ -116,17 +114,27 @@ class AdminMetricsService:
     def _token_hash(token: str) -> str:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _constant_time_text_matches(value: object, expected: object) -> bool:
+        if not isinstance(value, str) or not isinstance(expected, str):
+            return False
+        try:
+            return hmac.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
+        except UnicodeError:
+            return False
+
     def _ensure_admin(self, connection: Any) -> dict[str, Any]:
+        connection.execute("SELECT pg_advisory_xact_lock(9172468021468024)")
         existing_admin = connection.execute(
             """
-            SELECT id, username, password_hash, role
+            SELECT id, username, password_hash, role, failed_login_count, locked_until
             FROM admin_users
             WHERE role = 'admin'
             LIMIT 1
             """
         ).fetchone()
         if existing_admin is not None:
-            if not hmac.compare_digest(existing_admin["username"], self.username):
+            if not self._constant_time_text_matches(existing_admin["username"], self.username):
                 raise RuntimeError("单一管理员账号已初始化，拒绝创建第二个管理员")
             return existing_admin
 
@@ -140,41 +148,56 @@ class AdminMetricsService:
         )
         row = connection.execute(
             """
-            SELECT id, username, password_hash, role
+            SELECT id, username, password_hash, role, failed_login_count, locked_until
             FROM admin_users
-            WHERE username = %s AND role = 'admin'
+            WHERE role = 'admin'
+            LIMIT 1
             """,
-            (self.username,),
         ).fetchone()
-        if row is None:
+        if row is None or not self._constant_time_text_matches(row["username"], self.username):
             raise RuntimeError("管理员账号初始化失败")
         return row
-
-    def _record_login_failure(self, now: datetime) -> None:
-        self._failed_logins += 1
-        if self._failed_logins >= self.MAX_FAILED_LOGINS:
-            self._locked_until = now + self.LOCKOUT_TTL
 
     def login(self, username: str, password: str) -> dict[str, Any]:
         """Issue a short-lived opaque token, or return the same failure for all errors."""
         now = datetime.now(timezone.utc)
-        if self._locked_until and now < self._locked_until:
-            raise PermissionError("登录失败")
-        if self._locked_until and now >= self._locked_until:
-            self._failed_logins = 0
-            self._locked_until = None
 
         with self._connect() as connection:
             admin = self._ensure_admin(connection)
+            locked_until = admin.get("locked_until")
+            if locked_until and now < locked_until:
+                raise PermissionError("登录失败")
+            if locked_until:
+                connection.execute(
+                    """
+                    UPDATE admin_users SET failed_login_count = 0, locked_until = NULL, updated_at = %s
+                    WHERE id = %s
+                    """,
+                    (now, admin["id"]),
+                )
 
-            username_matches = isinstance(username, str) and hmac.compare_digest(
-                username, self.username
-            )
+            username_matches = self._constant_time_text_matches(username, self.username)
             password_matches = self._password_matches(password, admin["password_hash"])
             if not username_matches or not password_matches:
-                self._record_login_failure(now)
+                connection.execute(
+                    """
+                    UPDATE admin_users SET failed_login_count = failed_login_count + 1,
+                        locked_until = CASE WHEN failed_login_count + 1 >= %s THEN %s ELSE locked_until END,
+                        updated_at = %s
+                    WHERE id = %s
+                    RETURNING failed_login_count, locked_until
+                    """,
+                    (self.MAX_FAILED_LOGINS, now + self.LOCKOUT_TTL, now, admin["id"]),
+                ).fetchone()
                 raise PermissionError("登录失败")
 
+            connection.execute(
+                """
+                UPDATE admin_users SET failed_login_count = 0, locked_until = NULL, updated_at = %s
+                WHERE id = %s
+                """,
+                (now, admin["id"]),
+            )
             token = secrets.token_urlsafe(32)
             expires_at = now + self.SESSION_TTL
             connection.execute(
@@ -185,8 +208,6 @@ class AdminMetricsService:
                 (self._make_id("admin_session"), admin["id"], self._token_hash(token), expires_at),
             )
 
-        self._failed_logins = 0
-        self._locked_until = None
         return {"token": token, "expires_at": expires_at}
 
     def authenticate(self, token: str) -> dict[str, Any]:
@@ -264,20 +285,32 @@ class AdminMetricsService:
                 JOIN test_users u ON u.anonymous_id = e.anonymous_id
                 {where}
             ), scoped_feedback AS (
-                SELECT DISTINCT f.plan_item_id, f.rating, f.session_id
+                SELECT f.plan_item_id, f.rating, f.session_id
                 FROM task_test_feedback f
-                JOIN scoped_events e ON e.plan_item_id = f.plan_item_id
+                JOIN (
+                    SELECT DISTINCT e.plan_item_id
+                    FROM scoped_events e
+                    WHERE e.plan_item_id IS NOT NULL
+                ) feedback_plan_items ON feedback_plan_items.plan_item_id = f.plan_item_id
+            ), event_totals AS (
+                SELECT
+                    COUNT(DISTINCT e.anonymous_id) AS user_count,
+                    COUNT(DISTINCT e.session_id) FILTER (WHERE e.session_id IS NOT NULL) AS session_count,
+                    COUNT(*) FILTER (WHERE e.event_type = 'task_replaced') AS replacement_count,
+                    COUNT(*) FILTER (WHERE e.event_type = 'task_skipped') AS skip_count,
+                    COUNT(*) FILTER (WHERE e.event_type = 'recommendations_viewed') AS recommendation_count
+                FROM scoped_events e
+            ), feedback_totals AS (
+                SELECT
+                    COUNT(DISTINCT f.session_id) FILTER (WHERE f.session_id IS NOT NULL) AS completed_sessions,
+                    AVG(f.rating) AS average_rating
+                FROM scoped_feedback f
             )
             SELECT
-                COUNT(DISTINCT e.anonymous_id) AS user_count,
-                COUNT(DISTINCT e.session_id) FILTER (WHERE e.session_id IS NOT NULL) AS session_count,
-                COUNT(DISTINCT f.session_id) FILTER (WHERE f.session_id IS NOT NULL) AS completed_sessions,
-                AVG(f.rating) AS average_rating,
-                COUNT(*) FILTER (WHERE e.event_type = 'task_replaced') AS replacement_count,
-                COUNT(*) FILTER (WHERE e.event_type = 'task_skipped') AS skip_count,
-                COUNT(*) FILTER (WHERE e.event_type = 'recommendations_viewed') AS recommendation_count
-            FROM scoped_events e
-            LEFT JOIN scoped_feedback f ON f.plan_item_id = e.plan_item_id
+                e.user_count, e.session_count, f.completed_sessions, f.average_rating,
+                e.replacement_count, e.skip_count, e.recommendation_count
+            FROM event_totals e
+            CROSS JOIN feedback_totals f
         """
         with self._connect() as connection:
             row = connection.execute(statement, params).fetchone() or {}
@@ -304,7 +337,7 @@ class AdminMetricsService:
             GROUP BY e.event_type
         """
         with self._connect() as connection:
-            rows = connection.execute(statement, params + (_FUNNEL_EVENTS,)).fetchall()
+            rows = connection.execute(statement, params + (list(_FUNNEL_EVENTS),)).fetchall()
         counts = {row["event_type"]: int(row["count"]) for row in rows}
         return [{"event_type": event_type, "count": counts.get(event_type, 0)} for event_type in _FUNNEL_EVENTS]
 
@@ -312,19 +345,39 @@ class AdminMetricsService:
         where, params = self._event_where(filters)
         statement = f"""
             /* admin_metrics:recommendations */
+            WITH scoped_events AS (
+                SELECT e.plan_item_id, e.event_type, e.metadata_json ->> 'task_category' AS task_category
+                FROM test_events e
+                JOIN test_users u ON u.anonymous_id = e.anonymous_id
+                {where}
+                  {'AND' if where else 'WHERE'} e.metadata_json ? 'task_category'
+            ), category_events AS (
+                SELECT
+                    task_category,
+                    COUNT(*) FILTER (WHERE event_type = 'recommendations_viewed') AS recommendation_count,
+                    COUNT(*) FILTER (WHERE event_type = 'task_replaced') AS replacement_count,
+                    COUNT(*) FILTER (WHERE event_type = 'task_skipped') AS skip_count
+                FROM scoped_events
+                GROUP BY task_category
+            ), feedback_plan_items AS (
+                SELECT DISTINCT task_category, plan_item_id
+                FROM scoped_events
+                WHERE plan_item_id IS NOT NULL
+            ), feedback_by_category AS (
+                SELECT feedback_plan_items.task_category, AVG(f.rating) AS average_rating
+                FROM feedback_plan_items
+                JOIN task_test_feedback f ON f.plan_item_id = feedback_plan_items.plan_item_id
+                GROUP BY feedback_plan_items.task_category
+            )
             SELECT
-                e.metadata_json ->> 'task_category' AS task_category,
-                COUNT(*) FILTER (WHERE e.event_type = 'recommendations_viewed') AS recommendation_count,
-                AVG(f.rating) AS average_rating,
-                COUNT(*) FILTER (WHERE e.event_type = 'task_replaced') AS replacement_count,
-                COUNT(*) FILTER (WHERE e.event_type = 'task_skipped') AS skip_count
-            FROM test_events e
-            JOIN test_users u ON u.anonymous_id = e.anonymous_id
-            LEFT JOIN task_test_feedback f ON f.plan_item_id = e.plan_item_id
-            {where}
-              {'AND' if where else 'WHERE'} e.metadata_json ? 'task_category'
-            GROUP BY e.metadata_json ->> 'task_category'
-            ORDER BY task_category ASC
+                category_events.task_category,
+                category_events.recommendation_count,
+                feedback_by_category.average_rating,
+                category_events.replacement_count,
+                category_events.skip_count
+            FROM category_events
+            LEFT JOIN feedback_by_category ON feedback_by_category.task_category = category_events.task_category
+            ORDER BY category_events.task_category ASC
         """
         with self._connect() as connection:
             rows = connection.execute(statement, params).fetchall()
