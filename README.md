@@ -174,7 +174,7 @@ Scheduling 模块把推荐任务排进用户提供的可用时间窗口，并生
 
 ## 数据与 MVP 边界
 
-后端只使用 PostgreSQL，不提供内存模式。本地测试版只使用浏览器保存的 `session_id`，不使用 Token、登录或 `Authorization`。因此它适合本地开发、演示和功能验收，不应直接作为公开生产环境的认证方案。
+后端只使用 PostgreSQL，不提供内存模式。普通业务页面使用浏览器保存的 `session_id`，不要求普通用户登录或携带 `Authorization`。测试观测还会保存不含个人信息的 `mvp_test_anonymous_id`；浏览器存储被阻止时改用当前页面会话内的随机匿名编号，不使用固定共享编号。管理员看板另用短期 bearer token 认证；退出流程结束时前端总会清除本地 token，但服务端只有在 logout 请求成功时才会撤销 token，请求失败时服务端 token 会自然过期。不要复制、分享、写入代码或日志；公网部署必须使用 HTTPS 和密钥管理。
 
 当前不在 MVP 范围内的能力包括实时地图/商户/活动搜索、PDF 下载、邮件发送、日历同步、用户账号体系、跨设备登录和大模型实时对话。任务推荐也不表示医疗、心理或职业建议。
 
@@ -229,6 +229,13 @@ $env:SESSION_DATABASE_URL = `
   "postgresql://postgres:<password>@127.0.0.1:5433/free_time_agent"
 ```
 
+如需使用测试指标管理员看板，再设置以下变量。密码只写入当前终端或部署平台的密钥配置，不要写入代码、日志或提交：
+
+```powershell
+$env:ADMIN_METRICS_USERNAME = '<admin-username>'
+$env:ADMIN_METRICS_PASSWORD = '<strong-password>'
+```
+
 ## 4. 启动后端
 
 ```powershell
@@ -268,7 +275,17 @@ Set-Location "D:\yxy1.0"
 http://127.0.0.1:5173/
 ```
 
-前端只在 `localStorage` 保存 `free_time_agent_session_id`。刷新页面后会从 PostgreSQL 恢复当前问卷和已保存答案。
+管理员看板地址：
+
+```text
+http://127.0.0.1:5173/admin.html
+```
+
+看板登录后只展示匿名聚合指标和按匿名编号筛选的匿名行为明细，不展示个人身份。完整的大学生邀请、匿名编号复用、指标口径、一个月记录和删除注意事项见 [测试指标使用说明](docs/user-testing-metrics.md)。
+
+管理员也可以在看板中按匿名编号删除观测数据，或手动运行 90 天保留期清理；这些操作不会删除业务会话、计划、任务或正常业务反馈。
+
+前端在 `localStorage` 保存 `free_time_agent_session_id` 和测试用 `mvp_test_anonymous_id`。后者只是区分测试样本的匿名编号，不是用户账号；若存储不可用，只在当前浏览器会话内保留随机编号。刷新页面后业务会话会从 PostgreSQL 恢复当前问卷和已保存答案。管理员 token 只用于 `/admin.html` 的受保护请求；点击退出后本地 token 总会被清除，服务端撤销取决于 logout 请求是否成功，失败时会自然过期。不要把 token 或管理员密码粘贴到 issue、截图或提交中。
 
 ## 6. PWA 与上线准备
 
@@ -383,9 +400,18 @@ Set-Location "D:\yxy1.0"
   -s tests -p "test_*.py" -v
 
 node --test tests/*.test.js
+
+.\.venv\Scripts\python.exe -m py_compile `
+  main.py test_observability.py admin_metrics_service.py
+
+git diff --check
 ```
 
 Python 测试会创建临时 Session，并在结束后从 PostgreSQL 删除这些测试数据。
+
+测试指标交付的完整检查也可以直接使用上面四条命令的无 `-v` 版本；如果 PostgreSQL 不可用，Python 测试可能在模块启动时等待数据库连接，应记录被阻塞的原始命令和环境限制，不要把离线检查写成真实集成通过。
+
+管理员看板只适用于本地或受控环境。不要公开暴露 `/admin.html`、不要复用生产用户密码、不要把真实姓名或联系方式写入匿名测试记录；公网部署必须使用 HTTPS、受限的 `FRONTEND_ORIGINS` 和密钥管理。
 
 ## 9. 实机链路检查
 

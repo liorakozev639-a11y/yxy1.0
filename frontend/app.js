@@ -6,6 +6,8 @@
   const PRODUCT_MODE_KEY = 'free_time_agent_product_mode';
   const QUICK_DRAFT_KEY = 'free_time_agent_quick_draft';
   const QUICK_SELECTED_KEY = 'free_time_agent_quick_selected_task';
+  const TEST_ANONYMOUS_ID_KEY = 'mvp_test_anonymous_id';
+  const TEST_COHORT = window.FREE_TIME_TEST_COHORT || 'student_2026_09';
   const categories = [
     { id: 'energy', name: '活力充电', description: '运动、走动与身体恢复', icon: 'activity' },
     { id: 'calm', name: '松弛疗愈', description: '减压、休息与情绪恢复', icon: 'wind' },
@@ -67,6 +69,7 @@
     feedbackItemId: null,
     feedbackRating: null,
     feedbackReasons: [],
+    feedbackComment: '',
     executionReminders: null,
     review: null,
     showingReview: false,
@@ -82,11 +85,154 @@
   let toastTimer;
   let executionRefreshTimer;
   let deferredInstallPrompt = null;
+  let testActionSequence = 0;
+  let telemetryReporter = null;
+  let inMemoryTestAnonymousId = null;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
     }[character]));
+  }
+
+  function ensureTestAnonymousId() {
+    if (typeof api.getTestAnonymousId === 'function') return api.getTestAnonymousId();
+    if (inMemoryTestAnonymousId) return inMemoryTestAnonymousId;
+    const randomSource = window.crypto && typeof window.crypto.getRandomValues === 'function'
+      ? window.crypto.getRandomValues.bind(window.crypto)
+      : null;
+    const values = new Uint32Array(1);
+    if (randomSource) randomSource(values);
+    const entropy = values[0] || Math.floor(Math.random() * 900000);
+    inMemoryTestAnonymousId = `student_${100000 + (entropy % 900000)}`;
+    try {
+      const existing = window.localStorage.getItem(TEST_ANONYMOUS_ID_KEY);
+      if (existing) return existing;
+      window.localStorage.setItem(TEST_ANONYMOUS_ID_KEY, inMemoryTestAnonymousId);
+    } catch (_) {
+      // Keep the browser-session id in memory when storage is unavailable.
+    }
+    return inMemoryTestAnonymousId;
+  }
+
+  function createTestActionId(action) {
+    testActionSequence += 1;
+    return `action:${action}:${Date.now().toString(36)}:${testActionSequence}`;
+  }
+
+  function reportTestEvent(event) {
+    try {
+      if (!telemetryReporter) {
+        telemetryReporter = api.createTestTelemetry({
+          getAnonymousId: ensureTestAnonymousId,
+          getSessionId: () => state.sessionId,
+          recordEvent: api.recordTestEvent,
+          logger: console,
+        });
+      }
+      return telemetryReporter.report(event);
+    } catch (error) {
+      console.debug('test telemetry event failed', error?.code || error?.message || error);
+      return Promise.resolve({ recorded: false });
+    }
+  }
+
+  function reportTestFeedback(itemId, rating, comment) {
+    try {
+      const feedback = {
+        anonymous_id: ensureTestAnonymousId(),
+        session_id: state.sessionId,
+        plan_item_id: itemId,
+        rating,
+        comment: comment || null,
+      };
+      return Promise.resolve(api.saveTestFeedback(feedback)).catch((error) => {
+        console.debug('test telemetry feedback failed', error?.code || error?.message || error);
+        return { recorded: false };
+      });
+    } catch (error) {
+      console.debug('test telemetry feedback failed', error?.code || error?.message || error);
+      return Promise.resolve({ recorded: false });
+    }
+  }
+
+  async function identifyTestUser() {
+    const anonymousId = ensureTestAnonymousId();
+    try {
+      await api.identifyTestUser(anonymousId, TEST_COHORT);
+    } catch (error) {
+      console.debug('test telemetry identity failed', error?.code || error?.message || error);
+    }
+    return anonymousId;
+  }
+
+  function promptReason(action) {
+    const prompt = action === 'skip' ? '跳过原因（可填代码，如 low_energy）' : '替换原因（可填代码，如 not_interested）';
+    let value = 'other';
+    let detail = '';
+    try {
+      value = typeof window.prompt === 'function' ? window.prompt(prompt, 'other') : 'other';
+    } catch (_) {
+      value = 'other';
+    }
+    const allowed = new Set([
+      'not_interested', 'low_energy', 'not_enough_time', 'over_budget',
+      'location_inconvenient', 'too_difficult', 'not_matching_current_state', 'other',
+    ]);
+    try {
+      detail = typeof window.prompt === 'function'
+        ? String(window.prompt('可补充一句原因说明（可选，最多 500 字）', '') || '')
+        : '';
+    } catch (_) {
+      detail = '';
+    }
+    return {
+      reason_code: allowed.has(value) ? value : 'other',
+      metadata: detail.trim() ? { reason_detail: detail.trim().slice(0, 500) } : {},
+    };
+  }
+
+  function promptReasonCode(action) {
+    return promptReason(action).reason_code;
+  }
+
+  const ADJUSTMENT_REASON_CODES = {
+    easier: 'low_energy',
+    shorter: 'not_enough_time',
+    cheaper: 'over_budget',
+    nearer: 'location_inconvenient',
+    less_social: 'not_matching_current_state',
+    more_growth: 'not_matching_current_state',
+  };
+
+  function reasonCodeForAdjustment(adjustment) {
+    return ADJUSTMENT_REASON_CODES[adjustment] || 'other';
+  }
+
+  function reportRecommendationsViewed({ sessionId, planId, items, mode = null, energyLevel = null }) {
+    const seen = new Set();
+    const telemetryItems = typeof api.dedupeRecommendationTelemetryItems === 'function'
+      ? api.dedupeRecommendationTelemetryItems(items)
+      : (Array.isArray(items) ? items : []);
+    telemetryItems.forEach((rawItem, index) => {
+      const category = rawItem && (rawItem.category || rawItem.task_category);
+      if (!category) return;
+      const item = rawItem.category ? rawItem : { ...rawItem, category };
+      const identity = item.task_id || item.id || item.item_id || `index-${index}`;
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      void reportTestEvent({
+        event_type: 'recommendations_viewed',
+        session_id: sessionId ?? state.sessionId ?? null,
+        plan_id: planId ?? state.plan?.plan_id ?? null,
+        metadata: {
+          task_category: item.category,
+          ...(mode ? { mode } : {}),
+          ...(energyLevel ? { energy_level: energyLevel } : {}),
+        },
+        idempotency_key: `recommendations_viewed:${sessionId || state.sessionId || 'none'}:${planId || state.plan?.plan_id || 'none'}:${identity}`,
+      });
+    });
   }
 
   function recommendationStorageKey() {
@@ -488,6 +634,7 @@
       <span class="feedback-label">${prompt}</span>
       <div class="feedback-rating">${[1, 2, 3, 4, 5].map((rating) => `<button class="feedback-star ${state.feedbackRating === rating ? 'is-selected' : ''}" data-action="choose-feedback-rating" data-rating="${rating}" aria-label="${rating} 分">${rating}</button>`).join('')}</div>
       <div class="feedback-reasons">${reasons.map((reason) => `<button class="feedback-reason ${state.feedbackReasons.includes(reason) ? 'is-selected' : ''}" data-action="toggle-feedback-reason" data-reason="${reason}">${reason}</button>`).join('')}</div>
+      <textarea class="feedback-comment" data-feedback-comment maxlength="500" placeholder="补充一句体验（可选）">${escapeHtml(state.feedbackComment)}</textarea>
       <button class="button primary compact" data-action="save-feedback" ${state.feedbackRating ? '' : 'disabled'}>保存反馈</button>
     </div>`;
   }
@@ -889,6 +1036,7 @@
     state.detailItemId = null;
     state.feedbackRating = null;
     state.feedbackReasons = [];
+    state.feedbackComment = '';
     state.executionReminders = null;
     state.review = null;
     state.showingReview = false;
@@ -946,6 +1094,11 @@
     resetLocalState();
     state.sessionId = created.session_id;
     state.step = 'welcome';
+    void reportTestEvent({
+      event_type: 'session_created',
+      session_id: state.sessionId,
+      idempotency_key: `session_created:${state.sessionId}`,
+    });
   }
 
   async function recoverExpiredSession() {
@@ -974,6 +1127,10 @@
         state.error = error.message || '请求失败，请稍后重试';
         state.planRecoveryOptions = flow.planFailureRecoveryOptions(error.details);
         state.retryTask = task;
+        void reportTestEvent({
+          event_type: 'flow_error',
+          metadata: { error_code: error.code || 'request_failed', status: error.status || 0 },
+        });
       }
     } finally {
       state.busy = false;
@@ -990,6 +1147,16 @@
     try {
       await task();
     } catch (error) {
+      const failedSessionId = state.quickSessionId;
+      void reportTestEvent({
+        event_type: 'flow_error',
+        session_id: failedSessionId,
+        metadata: {
+          mode: 'quick',
+          error_code: error.code || 'request_failed',
+          status: error.status || 0,
+        },
+      });
       if ([404, 410].includes(error.status)) {
         api.forgetQuickSession();
         state.quickSessionId = null;
@@ -1039,6 +1206,7 @@
     state.step = 'booting';
     state.busy = true;
     state.error = '';
+    void identifyTestUser();
     render();
     try {
       await api.getHealth();
@@ -1067,6 +1235,11 @@
       }
       const restored = await api.restoreSession(storedSessionId);
       state.sessionId = restored.session_id;
+      void reportTestEvent({
+        event_type: 'session_created',
+        session_id: state.sessionId,
+        idempotency_key: `session_created:${state.sessionId}`,
+      });
       state.recommendation = restoreRecommendation();
       hydratePreferences(restored.preferences || {});
       const initialDestination = flow.resumeDestination({
@@ -1098,6 +1271,10 @@
         const started = await api.startQuestionnaire(progress.mode);
         hydrateQuestionnaire(started, progress);
         state.step = 'quiz';
+        void reportTestEvent({
+          event_type: 'questionnaire_started',
+          metadata: { mode: progress.mode },
+        });
       } catch (error) {
         if (error.status !== 409) throw error;
         state.step = 'mode';
@@ -1192,6 +1369,14 @@
     state.recommendation = generated.recommendation || null;
     persistRecommendation(state.recommendation);
     state.step = 'result';
+    reportRecommendationsViewed({
+      planId: state.plan?.plan_id || null,
+      energyLevel: state.profile.energy_level,
+      items: [
+        ...(Array.isArray(state.recommendation?.tasks) ? state.recommendation.tasks : []),
+        ...(Array.isArray(state.plan?.items) ? state.plan.items : []),
+      ],
+    });
   }
 
   async function applyPlanRecovery(option) {
@@ -1332,6 +1517,10 @@
         const started = await api.startQuestionnaire(control.dataset.mode);
         hydrateQuestionnaire(started, null);
         state.step = 'quiz';
+        void reportTestEvent({
+          event_type: 'questionnaire_started',
+          metadata: { mode: control.dataset.mode },
+        });
       });
       return;
     }
@@ -1358,6 +1547,7 @@
         state.result = await api.submitQuestionnaire();
         state.profileInsight = await api.getProfileInsight();
         state.step = 'insight';
+        void reportTestEvent({ event_type: 'questionnaire_completed' });
       });
       return;
     }
@@ -1380,6 +1570,7 @@
     if (action === 'confirm-energy-start') {
       const plan = state.plan;
       if (!plan || !state.energyItemId || !state.energyChoice) return;
+      const actionId = createTestActionId('task_started');
       await runTask(async () => {
         const prepare = await api.prepareExecution(plan.plan_id, state.energyItemId, {
           user_id: state.userId,
@@ -1391,6 +1582,14 @@
         }
         const payload = await api.startExecution(plan.plan_id, state.energyItemId, { user_id: state.userId });
         applyExecutionPayload(payload);
+        const item = plan.items.find((entry) => entry.id === state.energyItemId);
+        void reportTestEvent({
+          event_type: 'task_started',
+          action_id: actionId,
+          plan_id: plan.plan_id,
+          plan_item_id: state.energyItemId,
+          metadata: { task_category: item?.category || null },
+        });
         state.energyItemId = null;
         state.energyChoice = null;
         showToast('任务已开始');
@@ -1400,10 +1599,18 @@
     if (action === 'replace-easier') {
       const plan = state.plan;
       if (!plan || !state.energyItemId) return;
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
         state.plan = await api.replacePlanItemEasier(plan.plan_id, state.energyItemId, {
           expected_version: plan.version,
           user_id: state.userId,
+        });
+        void reportTestEvent({
+          event_type: 'task_replaced',
+          action_id: actionId,
+          plan_id: plan.plan_id,
+          plan_item_id: state.energyItemId,
+          reason_code: 'low_energy',
         });
         state.energyItemId = null;
         state.energyChoice = null;
@@ -1416,6 +1623,7 @@
       const plan = state.plan;
       if (!plan) return;
       const itemId = control.dataset.itemId;
+      const actionId = createTestActionId(action);
       await runTask(async () => {
         const payload = action === 'complete-execution'
           ? await api.completeExecution(plan.plan_id, itemId, { user_id: state.userId })
@@ -1423,6 +1631,26 @@
             ? await api.skipExecution(plan.plan_id, itemId, { user_id: state.userId })
             : await api.checkExecutionDeadline(plan.plan_id, itemId, { user_id: state.userId });
         applyExecutionPayload(payload);
+        const item = plan.items.find((entry) => entry.id === itemId);
+        if (action === 'complete-execution') {
+          void reportTestEvent({
+            event_type: 'task_completed',
+            action_id: actionId,
+            plan_id: plan.plan_id,
+            plan_item_id: itemId,
+            metadata: { task_category: item?.category || null },
+          });
+        } else if (action === 'skip-execution') {
+          const reason = promptReason('skip');
+          void reportTestEvent({
+            event_type: 'task_skipped',
+            action_id: actionId,
+            plan_id: plan.plan_id,
+            plan_item_id: itemId,
+            reason_code: reason.reason_code,
+            metadata: { task_category: item?.category || null, ...reason.metadata },
+          });
+        }
         showToast(action === 'complete-execution' ? '任务已完成' : action === 'skip-execution' ? '任务已跳过，稍后可重新排程' : '已检查任务截止时间');
       });
       return;
@@ -1504,10 +1732,20 @@
     if (action === 'save-feedback') {
       const plan = state.plan;
       if (!plan || !state.feedbackItemId || !state.feedbackRating) return;
+      const actionId = createTestActionId('feedback_submitted');
       await runTask(async () => {
         const feedback = await api.saveFeedback(plan.plan_id, state.feedbackItemId, {
           rating: state.feedbackRating,
           reasons: state.feedbackReasons,
+        });
+        const feedbackComment = state.feedbackComment.trim();
+        void reportTestFeedback(state.feedbackItemId, state.feedbackRating, feedbackComment);
+        void reportTestEvent({
+          event_type: 'feedback_submitted',
+          action_id: actionId,
+          plan_id: plan.plan_id,
+          plan_item_id: state.feedbackItemId,
+          metadata: { reasons: state.feedbackReasons, has_comment: Boolean(feedbackComment) },
         });
         if (feedback.recommendation_memory) {
           state.plan = {
@@ -1518,6 +1756,7 @@
         state.feedbackItemId = null;
         state.feedbackRating = null;
         state.feedbackReasons = [];
+        state.feedbackComment = '';
         showToast('反馈已保存');
       });
       return;
@@ -1536,16 +1775,33 @@
           start_at: new Date(startInput).toISOString(),
           end_at: new Date(endInput).toISOString(),
         });
+        void reportTestEvent({
+          event_type: 'schedule_adjusted',
+          plan_id: plan.plan_id,
+          plan_item_id: item.id,
+          metadata: { task_category: item.category || null },
+        });
       });
       return;
     }
     if (action === 'replace-plan-item') {
       const plan = state.plan;
       if (!plan) return;
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
+        const item = plan.items.find((entry) => entry.id === control.dataset.itemId);
         state.plan = await api.replacePlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
           user_id: state.userId,
+        });
+        const reason = promptReason('replace');
+        void reportTestEvent({
+          event_type: 'task_replaced',
+          action_id: actionId,
+          plan_id: plan.plan_id,
+          plan_item_id: control.dataset.itemId,
+          reason_code: reason.reason_code,
+          metadata: { task_category: item?.category || null, ...reason.metadata },
         });
         showToast('已更换任务');
       });
@@ -1554,12 +1810,20 @@
     if (action === 'adjust-plan-item') {
       const plan = state.plan;
       if (!plan) return;
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
         try {
           state.plan = await api.adjustPlanItem(plan.plan_id, control.dataset.itemId, {
             expected_version: plan.version,
             adjustment: control.dataset.adjustment,
             user_id: state.userId,
+          });
+          void reportTestEvent({
+            event_type: 'task_replaced',
+            action_id: actionId,
+            plan_id: plan.plan_id,
+            plan_item_id: control.dataset.itemId,
+            reason_code: reasonCodeForAdjustment(control.dataset.adjustment),
           });
           showToast('已按你的偏好换成新任务');
         } catch (error) {
@@ -1573,6 +1837,7 @@
       return;
     }
     if (action === 'adjust-recommendation-task') {
+      const actionId = createTestActionId('task_replaced');
       await runTask(async () => {
         try {
           const result = await api.adjustRecommendationTask(control.dataset.itemId, {
@@ -1587,6 +1852,13 @@
               recommendation_memory: result.recommendation_memory,
             };
           }
+          void reportTestEvent({
+            event_type: 'task_replaced',
+            action_id: actionId,
+            plan_id: state.plan?.plan_id || null,
+            reason_code: reasonCodeForAdjustment(control.dataset.adjustment),
+            metadata: { adjustment: control.dataset.adjustment },
+          });
           showToast('已按你的偏好换成新推荐');
         } catch (error) {
           if (error.status === 409) {
@@ -1614,9 +1886,20 @@
     if (action === 'skip-plan-item') {
       const plan = state.plan;
       if (!plan) return;
+      const actionId = createTestActionId('task_skipped');
       await runTask(async () => {
+        const item = plan.items.find((entry) => entry.id === control.dataset.itemId);
         state.plan = await api.skipPlanItem(plan.plan_id, control.dataset.itemId, {
           expected_version: plan.version,
+        });
+        const reason = promptReason('skip');
+        void reportTestEvent({
+          event_type: 'task_skipped',
+          action_id: actionId,
+          plan_id: plan.plan_id,
+          plan_item_id: control.dataset.itemId,
+          reason_code: reason.reason_code,
+          metadata: { task_category: item?.category || null, ...reason.metadata },
         });
       });
       return;
@@ -1682,12 +1965,26 @@
       if (!state.quickSessionId) {
         const session = await api.createQuickSession();
         state.quickSessionId = session.session_id;
+        void reportTestEvent({
+          event_type: 'session_created',
+          session_id: state.quickSessionId,
+          idempotency_key: `session_created:${state.quickSessionId}`,
+        });
       }
       state.quickRun = await api.createQuickRecommendations({
         available_minutes: minutes,
         energy_level: state.quickDraft.energy_level,
         user_id: state.userId,
       }, state.quickSessionId);
+      reportRecommendationsViewed({
+        sessionId: state.quickSessionId,
+        mode: 'quick',
+        energyLevel: state.quickDraft.energy_level,
+        items: [
+          state.quickRun?.primary_task,
+          ...(Array.isArray(state.quickRun?.alternatives) ? state.quickRun.alternatives : []),
+        ],
+      });
       state.quickRestSelected = false;
       state.quickShowMore = false;
       window.localStorage.removeItem(QUICK_SELECTED_KEY);
@@ -1719,6 +2016,7 @@
       saveQuickDraft();
     }
     if (event.target.name === 'location') state.profile.location = event.target.value;
+    if (event.target.matches('[data-feedback-comment]')) state.feedbackComment = event.target.value;
   });
 
   window.addEventListener('beforeinstallprompt', (event) => {

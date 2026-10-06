@@ -2,9 +2,15 @@
   const exported = factory();
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   if (root) {
+    let storage = null;
+    try {
+      storage = root.localStorage;
+    } catch (_) {
+      // Storage access can throw in private or blocked browser contexts.
+    }
     const client = exported.createApi({
       fetchImpl: root.fetch.bind(root),
-      storage: root.localStorage,
+      storage,
       baseUrl: root.FREE_TIME_API_BASE_URL,
     });
     root.FreeTimeApi = { ...exported, ...client };
@@ -13,6 +19,42 @@
   const STORAGE_KEY = 'free_time_agent_session_id';
   const USER_STORAGE_KEY = 'free_time_agent_user_id';
   const QUICK_STORAGE_KEY = 'free_time_agent_quick_session_id';
+  const TEST_ANONYMOUS_ID_KEY = 'mvp_test_anonymous_id';
+  const ADMIN_TOKEN_STORAGE_KEY = 'mvp_admin_metrics_token';
+  let anonymousIdSequence = 0;
+  const generatedAnonymousIds = new Set();
+
+  function randomUint32() {
+    try {
+      if (typeof globalThis !== 'undefined' && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+        const values = new Uint32Array(1);
+        globalThis.crypto.getRandomValues(values);
+        return values[0];
+      }
+    } catch (_) {
+      // Fall through to the session-local entropy source.
+    }
+    anonymousIdSequence += 1;
+    const time = Date.now() >>> 0;
+    const random = Math.floor(Math.random() * 0x100000000) >>> 0;
+    return (time ^ random ^ anonymousIdSequence) >>> 0;
+  }
+
+  function generateTestAnonymousId() {
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const number = 100000 + (randomUint32() % 900000);
+      const candidate = `student_${number}`;
+      if (!generatedAnonymousIds.has(candidate)) {
+        generatedAnonymousIds.add(candidate);
+        return candidate;
+      }
+    }
+    anonymousIdSequence += 1;
+    const number = 100000 + (anonymousIdSequence % 900000);
+    const candidate = `student_${number}`;
+    generatedAnonymousIds.add(candidate);
+    return candidate;
+  }
 
   function isLocalHostname(hostname) {
     return hostname === 'localhost'
@@ -45,13 +87,86 @@
     }
   }
 
+  function createTestTelemetry({
+    getAnonymousId,
+    getSessionId,
+    recordEvent,
+    logger = typeof console !== 'undefined' ? console : null,
+  } = {}) {
+    if (typeof getAnonymousId !== 'function') throw new Error('getAnonymousId 必须是函数');
+    if (typeof recordEvent !== 'function') throw new Error('recordEvent 必须是函数');
+    let sequence = 0;
+
+    function logFailure(error) {
+      if (logger && typeof logger.debug === 'function') {
+        logger.debug('test telemetry event failed', error?.code || error?.message || error);
+      }
+    }
+
+    function idempotencyKey(event, anonymousId) {
+      const scope = String(anonymousId || 'anonymous');
+      if (event.idempotency_key) {
+        const explicitKey = String(event.idempotency_key);
+        return explicitKey.startsWith(`telemetry:${scope}:`)
+          ? explicitKey
+          : `telemetry:${scope}:${explicitKey}`;
+      }
+      if (event.action_id) return `telemetry:${scope}:${event.event_type}:${event.action_id}`;
+      sequence += 1;
+      return `telemetry:${scope}:${event.event_type}:${Date.now().toString(36)}:${sequence}:${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    function report(event) {
+      try {
+        const { action_id: _actionId, ...rest } = event;
+        const anonymousId = getAnonymousId();
+        const payload = {
+          ...rest,
+          anonymous_id: anonymousId,
+          session_id: event.session_id ?? (typeof getSessionId === 'function' ? getSessionId() : null),
+          metadata: event.metadata || {},
+          idempotency_key: idempotencyKey(event, anonymousId),
+        };
+        return Promise.resolve(recordEvent(payload)).catch((error) => {
+          logFailure(error);
+          return { recorded: false };
+        });
+      } catch (error) {
+        logFailure(error);
+        return Promise.resolve({ recorded: false });
+      }
+    }
+
+    return { report };
+  }
+
+  function dedupeRecommendationTelemetryItems(items) {
+    const seen = new Set();
+    return (Array.isArray(items) ? items : []).filter((item) => {
+      const identity = item && (item.task_id || item.id || item.item_id);
+      if (!identity || seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+  }
+
+  function createMemoryStorage() {
+    const values = new Map();
+    return {
+      getItem(key) { return values.has(key) ? values.get(key) : null; },
+      setItem(key, value) { values.set(key, String(value)); },
+      removeItem(key) { values.delete(key); },
+    };
+  }
+
   function createApi({ fetchImpl, storage, baseUrl = DEFAULT_BASE_URL } = {}) {
     if (typeof fetchImpl !== 'function') throw new Error('fetchImpl 必须是函数');
-    if (!storage) throw new Error('storage 不能为空');
+    storage = storage || createMemoryStorage();
     const apiBase = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, '');
+    let inMemoryTestAnonymousId = null;
 
-    async function request(path, { method = 'GET', body } = {}) {
-      const headers = {};
+    async function request(path, { method = 'GET', body, headers: extraHeaders = {} } = {}) {
+      const headers = { ...extraHeaders };
       if (body !== undefined) headers['Content-Type'] = 'application/json';
       let response;
       try {
@@ -102,6 +217,25 @@
 
     function currentUserId() {
       return storage.getItem(USER_STORAGE_KEY);
+    }
+
+    function getTestAnonymousId() {
+      let existing = null;
+      try {
+        existing = storage.getItem(TEST_ANONYMOUS_ID_KEY);
+      } catch (_) {
+        // Private browsing and blocked storage still need a distinct session id.
+      }
+      if (existing) return existing;
+      if (inMemoryTestAnonymousId) return inMemoryTestAnonymousId;
+      const generated = generateTestAnonymousId();
+      inMemoryTestAnonymousId = generated;
+      try {
+        storage.setItem(TEST_ANONYMOUS_ID_KEY, generated);
+      } catch (_) {
+        // Keep the id in the module/session memory when storage is unavailable.
+      }
+      return generated;
     }
 
     async function ensureAnonymousUser() {
@@ -362,6 +496,83 @@
       return request(`/api/v1/plans/${planId}/feedback`);
     }
 
+    function identifyTestUser(anonymousId, cohort) {
+      return request('/api/v1/test-users/identify', {
+        method: 'POST',
+        body: { anonymous_id: anonymousId, cohort },
+      });
+    }
+
+    function recordTestEvent(event) {
+      return request('/api/v1/test-events', {
+        method: 'POST',
+        body: event,
+      });
+    }
+
+    function saveTestFeedback(feedback) {
+      return request('/api/v1/test-feedback', {
+        method: 'POST',
+        body: feedback,
+      });
+    }
+
+    function getAdminToken() {
+      return storage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+    }
+
+    async function adminLogin(username, password) {
+      const data = await request('/api/v1/admin/login', {
+        method: 'POST',
+        body: { username, password },
+      });
+      if (data && data.token) storage.setItem(ADMIN_TOKEN_STORAGE_KEY, data.token);
+      return data;
+    }
+
+    async function adminLogout() {
+      const token = getAdminToken();
+      if (!token) return { logged_out: false };
+      try {
+        return await request('/api/v1/admin/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } finally {
+        storage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+      }
+    }
+
+    function adminMetrics(path, filters = {}) {
+      const endpoint = String(path || '').replace(/^\/+/, '');
+      const query = new URLSearchParams();
+      Object.entries(filters || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') query.set(key, value);
+      });
+      const suffix = query.toString() ? `?${query.toString()}` : '';
+      const token = getAdminToken();
+      return request(`/api/v1/admin/metrics/${endpoint}${suffix}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    }
+
+    function deleteAdminTestUser(anonymousId) {
+      const encodedId = encodeURIComponent(String(anonymousId || ''));
+      const token = getAdminToken();
+      return request(`/api/v1/admin/test-users/${encodedId}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    }
+
+    function cleanupAdminTestObservations() {
+      const token = getAdminToken();
+      return request('/api/v1/admin/test-observations/cleanup', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    }
+
     async function clearSession(sessionId) {
       const current = requireSessionId(sessionId);
       const data = await request(`/api/v1/sessions/${current}/data`, {
@@ -402,7 +613,17 @@
       getSessionId,
       getQuickSessionId,
       getLatestQuickRecommendations,
+      getAdminToken,
+      getTestAnonymousId,
       generatePlan,
+      identifyTestUser,
+      recordTestEvent,
+      saveTestFeedback,
+      adminLogin,
+      adminLogout,
+      adminMetrics,
+      cleanupAdminTestObservations,
+      deleteAdminTestUser,
       restoreSession,
       replacePlanItem,
       replacePlanItemEasier,
@@ -424,5 +645,16 @@
     };
   }
 
-  return { ApiError, DEFAULT_BASE_URL, STORAGE_KEY, USER_STORAGE_KEY, QUICK_STORAGE_KEY, createApi };
+  return {
+    ADMIN_TOKEN_STORAGE_KEY,
+    ApiError,
+    DEFAULT_BASE_URL,
+    STORAGE_KEY,
+    TEST_ANONYMOUS_ID_KEY,
+    USER_STORAGE_KEY,
+    QUICK_STORAGE_KEY,
+    createTestTelemetry,
+    dedupeRecommendationTelemetryItems,
+    createApi,
+  };
 }));
