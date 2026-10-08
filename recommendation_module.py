@@ -620,6 +620,8 @@ def build_warning_text(
         warnings.append("当前时间段体力消耗可能偏高")
     if constraints.get("energy_level") == "low" and task.physical_load >= 4:
         warnings.append("低精力时可能偏累")
+    if constraints.get("energy_level") == "low" and task.social_pressure >= 4:
+        warnings.append("低精力时社交压力可能偏高")
     if constraints.get("mood") == "anxious" and task.social_pressure >= 4:
         warnings.append("焦虑时社交压力可能偏高")
     if not warnings:
@@ -705,7 +707,7 @@ def build_reason_text(
     constraints = constraints or {}
     active_minutes = slot_minutes or task.duration
     lines = [
-        f"你选择了「{task.category}」，这个任务可以覆盖该方向的空闲需求。",
+        f"你选择了「{task.category}」，推荐「{task.title}」完成这个方向的一项具体活动。",
         f"当前分类偏好分数为 {float(preference_score):.2f}，系统会优先保留匹配度更高的分类。",
     ]
     if task.outing == "home":
@@ -737,25 +739,47 @@ def build_reason_text(
     weather = constraints.get("weather")
     if weather in WEATHER_LABELS:
         if weather in {"rainy", "hot", "cold", "indoor"}:
-            lines.append(
-                f"考虑到{WEATHER_LABELS[weather]}，系统会优先保留居家、地点灵活或外出成本更低的任务。"
-            )
+            if task.outing == "home":
+                lines.append(f"考虑到{WEATHER_LABELS[weather]}，这项任务无需外出。")
+            else:
+                lines.append(f"考虑到{WEATHER_LABELS[weather]}，这项任务需要外出，执行成本可能增加。")
         else:
-            lines.append("今天天气适合外出，所以附近活动和城市探索会获得少量加分。")
+            lines.append(
+                "今天天气适合外出；"
+                + ("这项任务可以居家完成。" if task.outing == "home" else "这项任务需要外出。")
+            )
     day_part = constraints.get("day_part")
     if day_part in DAY_PART_LABELS:
         lines.append(
-            f"当前时间段是{DAY_PART_LABELS[day_part]}，系统会避免让这个时段变得过重。"
+            f"当前时间段是{DAY_PART_LABELS[day_part]}；这项任务约{active_minutes}分钟、"
+            f"{load_profile['physical_label']}，请按当下安排判断。"
         )
     energy_level = constraints.get("energy_level")
-    if energy_level in ENERGY_LABELS:
+    if energy_level == "low":
+        cautions = []
+        if task.physical_load >= 4:
+            cautions.append("体力消耗较高")
+        if task.social_pressure >= 4:
+            cautions.append("社交压力较高")
+        if cautions:
+            lines.append(
+                f"你现在是低精力状态；这项任务{'、'.join(cautions)}，"
+                "虽然符合所选分类和硬条件，仍请确认是否适合现在做。"
+            )
+        elif task.ease_level >= 4 and task.physical_load <= 2:
+            lines.append("你现在是低精力状态；这项任务轻松度较高、体力消耗较低，可以优先考虑。")
+        else:
+            lines.append("你现在是低精力状态；这项任务仍需投入一些精力，请按当下体感决定。")
+    elif energy_level in ENERGY_LABELS:
         lines.append(
-            f"你现在是{ENERGY_LABELS[energy_level]}状态，系统会按这个体感调整任务轻重。"
+            f"你现在是{ENERGY_LABELS[energy_level]}状态；这项任务的体力消耗为"
+            f"{load_profile['physical_label']}，可按当前意愿选择。"
         )
     mood = constraints.get("mood")
     if mood in MOOD_LABELS:
         lines.append(
-            f"你标记了「{MOOD_LABELS[mood]}」，系统会选择更贴近当前情绪的任务。"
+            f"你标记了「{MOOD_LABELS[mood]}」；这项任务属于{task.category}，"
+            f"社交压力为{load_profile['social_label']}，请按当前感受判断。"
         )
     return "\n".join(lines)
 

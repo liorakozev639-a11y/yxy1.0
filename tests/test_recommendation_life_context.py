@@ -143,6 +143,28 @@ class RecommendationLifeContextTests(unittest.TestCase):
         self.assertIn("当前天气下外出成本可能偏高", by_id["task_outdoor_run"]["warning_text"])
         self.assertIn("低精力时可能偏累", by_id["task_outdoor_run"]["warning_text"])
 
+    def test_reason_describes_outdoor_anxious_tradeoff_without_promising_fit(self) -> None:
+        task = Task(
+            id="task_outdoor_group", title="约朋友雨中快走", category="活力充电",
+            duration=30, budget=0, outing="nearby", company="group",
+            ease_level=2, physical_load=4, social_pressure=5,
+            location_dependency="nearby",
+        )
+        profile = {
+            "scores": {"活力充电": 0.8},
+            "constraints": {
+                "outing": "nearby", "company": "group", "budget_limit": 0,
+                "max_duration": 60, "weather": "rainy", "day_part": "evening",
+                "energy_level": "low", "mood": "anxious",
+            },
+        }
+        [recommended] = recommend_tasks(profile, ["活力充电"], [task])["tasks"]
+        reason = recommended["reason_text"]
+        self.assertIn("需要外出", reason)
+        self.assertIn("社交压力较高", reason)
+        self.assertNotIn("系统会优先保留居家", reason)
+        self.assertNotIn("系统会选择更贴近当前情绪", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

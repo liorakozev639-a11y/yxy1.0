@@ -47,6 +47,33 @@ class RankQuickTest(unittest.TestCase):
         ])
         self.assertEqual(ranked[0]["id"], "easy")
 
+    def test_reason_names_task_duration_and_first_action(self) -> None:
+        context = RecommendationContext("quick", "sess", None, 20, "medium")
+        [task] = rank_quick(context, [candidate(
+            "呼吸练习", duration=10, action="坐下，放松肩膀。",
+        )])
+        self.assertIn("呼吸练习", task["reason"])
+        self.assertIn("10分钟", task["reason"])
+        self.assertIn("坐下，放松肩膀。", task["reason"])
+
+    def test_low_energy_reason_discloses_high_load_instead_of_claiming_fit(self) -> None:
+        context = RecommendationContext("quick", "sess", None, 20, "low")
+        [task] = rank_quick(context, [candidate(
+            "较费力的任务", ease=2, physical=5, social_pressure=3,
+        )])
+        self.assertIn("低精力", task["reason"])
+        self.assertIn("体力消耗偏高", task["reason"])
+        self.assertNotIn("适合现在的低精力状态", task["reason"])
+
+    def test_low_energy_reason_does_not_call_medium_load_low(self) -> None:
+        context = RecommendationContext("quick", "sess", None, 20, "low")
+        [task] = rank_quick(context, [candidate(
+            "中等负担的任务", ease=4, physical=3, social_pressure=3,
+        )])
+        self.assertIn("体力消耗中等", task["reason"])
+        self.assertIn("社交压力中等", task["reason"])
+        self.assertNotIn("体力和社交负担低", task["reason"])
+
     def test_equal_fit_prefers_lower_preparation_cost(self) -> None:
         context = RecommendationContext("quick", "sess", None, 20, "medium")
         ranked = rank_quick(context, [

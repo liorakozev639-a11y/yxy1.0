@@ -166,6 +166,26 @@ class RecommendationReasonTests(unittest.TestCase):
         self.assertIn("轻松度较高", task["matched_preferences"])
         self.assertIn("体力消耗较低", task["reason_text"])
 
+    def test_reason_names_task_and_discloses_low_energy_social_tradeoff(self) -> None:
+        task = Task(
+            id="task_social_song", title="邀请朋友一起听一首歌", category="社交连接",
+            duration=10, budget=0, outing="home", company="group",
+            ease_level=5, physical_load=1, social_pressure=5,
+            location_dependency="home",
+        )
+        profile = {
+            "scores": {"社交连接": 0.8},
+            "constraints": {
+                "outing": "home", "company": "group", "budget_limit": 0,
+                "max_duration": 30, "energy_level": "low",
+            },
+        }
+        [recommended] = recommend_tasks(profile, ["社交连接"], [task])["tasks"]
+        self.assertIn("邀请朋友一起听一首歌", recommended["reason_text"])
+        self.assertIn("社交压力较高", recommended["reason_text"])
+        self.assertIn("低精力时社交压力可能偏高", recommended["warning_text"])
+        self.assertNotIn("系统会按这个体感调整任务轻重", recommended["reason_text"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,11 +30,21 @@ def _sort_key(
 
 def _payload(item: CandidateTask, context: RecommendationContext) -> dict[str, Any]:
     task = item.task
-    reason = (
-        "适合现在的低精力状态，可在家独自开始。"
-        if context.energy_level == "low"
-        else "无需出门或花钱，现在就能开始。"
-    )
+    if context.energy_level == "low":
+        cautions = []
+        if task.physical_load > 2:
+            cautions.append("体力消耗偏高" if task.physical_load >= 4 else "体力消耗中等")
+        if task.social_pressure > 2:
+            cautions.append("社交压力偏高" if task.social_pressure >= 4 else "社交压力中等")
+        if task.ease_level < 4 and not cautions:
+            cautions.append("轻松度不高")
+        fit = (
+            f"你现在是低精力状态；这项任务{'、'.join(cautions)}，请按状态决定是否开始。"
+            if cautions else "体力和社交负担低，适合现在的低精力状态，可在家独自开始。"
+        )
+    else:
+        fit = "无需出门或花钱，现在就能开始。"
+    reason = f"「{task.title}」约{task.duration}分钟。第一步：{item.first_action.strip()}\n{fit}"
     return {
         "id": task.id,
         "title": task.title,

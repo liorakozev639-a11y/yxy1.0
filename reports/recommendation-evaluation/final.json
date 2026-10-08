@@ -14,8 +14,8 @@
         "total": 557
       },
       "reasons": {
-        "passed": 3630,
-        "total": 3630
+        "passed": 3600,
+        "total": 3600
       },
       "constraint_rate": 1.0,
       "repetition_rate": 0.0,
@@ -55,8 +55,8 @@
           "total": 207
         },
         "reasons": {
-          "passed": 481,
-          "total": 481
+          "passed": 451,
+          "total": 451
         },
         "constraint_rate": 1.0,
         "repetition_rate": 0.0,
@@ -1227,8 +1227,8 @@
         "total": 7
       },
       "reasons": {
-        "passed": 21,
-        "total": 21
+        "passed": 19,
+        "total": 19
       },
       "issues": []
     },
@@ -1317,8 +1317,8 @@
         "total": 10
       },
       "reasons": {
-        "passed": 30,
-        "total": 30
+        "passed": 24,
+        "total": 24
       },
       "issues": []
     },
@@ -1413,8 +1413,8 @@
         "total": 10
       },
       "reasons": {
-        "passed": 30,
-        "total": 30
+        "passed": 28,
+        "total": 28
       },
       "issues": []
     },
@@ -1509,8 +1509,8 @@
         "total": 10
       },
       "reasons": {
-        "passed": 30,
-        "total": 30
+        "passed": 28,
+        "total": 28
       },
       "issues": []
     },
@@ -1626,8 +1626,8 @@
         "total": 27
       },
       "reasons": {
-        "passed": 81,
-        "total": 81
+        "passed": 63,
+        "total": 63
       },
       "issues": []
     },
