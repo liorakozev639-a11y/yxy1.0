@@ -1,0 +1,1748 @@
+{
+  "fixture": "D:\\yxy1.0\\data\\recommendation_evaluation_cases.json",
+  "summary": {
+    "overall": {
+      "case_count": 50,
+      "failed_case_count": 0,
+      "empty_case_count": 3,
+      "constraints": {
+        "passed": 560,
+        "total": 560
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 557
+      },
+      "reasons": {
+        "passed": 3630,
+        "total": 3630
+      },
+      "constraint_rate": 1.0,
+      "repetition_rate": 0.0,
+      "reason_consistency_rate": 1.0
+    },
+    "by_mode": {
+      "full": {
+        "case_count": 30,
+        "failed_case_count": 0,
+        "empty_case_count": 1,
+        "constraints": {
+          "passed": 351,
+          "total": 351
+        },
+        "repetition": {
+          "violations": 0,
+          "total": 350
+        },
+        "reasons": {
+          "passed": 3149,
+          "total": 3149
+        },
+        "constraint_rate": 1.0,
+        "repetition_rate": 0.0,
+        "reason_consistency_rate": 1.0
+      },
+      "quick": {
+        "case_count": 20,
+        "failed_case_count": 0,
+        "empty_case_count": 2,
+        "constraints": {
+          "passed": 209,
+          "total": 209
+        },
+        "repetition": {
+          "violations": 0,
+          "total": 207
+        },
+        "reasons": {
+          "passed": 481,
+          "total": 481
+        },
+        "constraint_rate": 1.0,
+        "repetition_rate": 0.0,
+        "reason_consistency_rate": 1.0
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "full-01-low-energy-home-15m",
+      "mode": "full",
+      "candidate_count": 58,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42",
+          "task_recovery_63"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-02-low-budget-growth-20m",
+      "mode": "full",
+      "candidate_count": 83,
+      "round_task_ids": [
+        [
+          "task_growth_118",
+          "task_growth_93",
+          "task_growth_100",
+          "task_growth_103",
+          "task_growth_117",
+          "task_growth_131",
+          "task_growth_132",
+          "task_growth_34",
+          "task_growth_42",
+          "task_growth_95"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-03-high-energy-home-30m",
+      "mode": "full",
+      "candidate_count": 82,
+      "round_task_ids": [
+        [
+          "task_energy_134",
+          "task_energy_16",
+          "task_energy_20",
+          "task_energy_36",
+          "task_energy_62",
+          "task_energy_111",
+          "task_energy_09",
+          "task_energy_114",
+          "task_energy_25",
+          "task_energy_34"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-04-city-exploration-60m",
+      "mode": "full",
+      "candidate_count": 129,
+      "round_task_ids": [
+        [
+          "task_explore_100",
+          "task_explore_108",
+          "task_explore_129",
+          "task_explore_103",
+          "task_explore_106",
+          "task_explore_122",
+          "task_explore_132",
+          "task_explore_135",
+          "task_explore_138",
+          "task_explore_140"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 86,
+        "total": 86
+      },
+      "issues": []
+    },
+    {
+      "id": "full-05-group-nearby-45m",
+      "mode": "full",
+      "candidate_count": 102,
+      "round_task_ids": [
+        [
+          "task_social_10",
+          "task_social_113",
+          "task_social_117",
+          "task_social_123",
+          "task_social_131",
+          "task_social_93",
+          "task_social_105",
+          "task_social_120",
+          "task_social_133",
+          "task_social_18"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 88,
+        "total": 88
+      },
+      "issues": []
+    },
+    {
+      "id": "full-06-five-categories-half-day",
+      "mode": "full",
+      "candidate_count": 700,
+      "round_task_ids": [
+        [
+          "task_recovery_100",
+          "task_social_100",
+          "task_energy_91",
+          "task_growth_118",
+          "task_explore_100",
+          "task_recovery_140",
+          "task_social_122",
+          "task_energy_106",
+          "task_energy_110",
+          "task_energy_117"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 86,
+        "total": 86
+      },
+      "issues": []
+    },
+    {
+      "id": "full-07-low-energy-two-categories",
+      "mode": "full",
+      "candidate_count": 169,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_growth_113",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-08-rainy-evening",
+      "mode": "full",
+      "candidate_count": 121,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42",
+          "task_recovery_63"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-09-late-high-energy",
+      "mode": "full",
+      "candidate_count": 82,
+      "round_task_ids": [
+        [
+          "task_energy_91",
+          "task_energy_113",
+          "task_energy_132",
+          "task_energy_87",
+          "task_energy_11",
+          "task_energy_140",
+          "task_energy_38",
+          "task_energy_43",
+          "task_energy_53",
+          "task_energy_78"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-10-budget-zero-city",
+      "mode": "full",
+      "candidate_count": 81,
+      "round_task_ids": [
+        [
+          "task_explore_100",
+          "task_explore_108",
+          "task_explore_129",
+          "task_explore_103",
+          "task_explore_106",
+          "task_explore_122",
+          "task_explore_132",
+          "task_explore_135",
+          "task_explore_138",
+          "task_explore_140"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 86,
+        "total": 86
+      },
+      "issues": []
+    },
+    {
+      "id": "full-11-home-group-social",
+      "mode": "full",
+      "candidate_count": 80,
+      "round_task_ids": [
+        [
+          "task_social_10",
+          "task_social_113",
+          "task_social_117",
+          "task_social_123",
+          "task_social_131",
+          "task_social_93",
+          "task_social_105",
+          "task_social_133",
+          "task_social_18",
+          "task_social_95"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-12-short-10m",
+      "mode": "full",
+      "candidate_count": 30,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42",
+          "task_recovery_63"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-13-empty-1m",
+      "mode": "full",
+      "candidate_count": 0,
+      "round_task_ids": [
+        []
+      ],
+      "constraints": {
+        "passed": 1,
+        "total": 1
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 0
+      },
+      "reasons": {
+        "passed": 0,
+        "total": 0
+      },
+      "issues": []
+    },
+    {
+      "id": "full-14-indoor-exploration",
+      "mode": "full",
+      "candidate_count": 69,
+      "round_task_ids": [
+        [
+          "task_explore_100",
+          "task_explore_108",
+          "task_explore_129",
+          "task_explore_103",
+          "task_explore_122",
+          "task_explore_132",
+          "task_explore_138",
+          "task_explore_140",
+          "task_explore_80",
+          "task_explore_99"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-15-weekend-growth",
+      "mode": "full",
+      "candidate_count": 37,
+      "round_task_ids": [
+        [
+          "task_growth_140",
+          "task_growth_135",
+          "task_growth_101",
+          "task_growth_104",
+          "task_growth_121",
+          "task_growth_133",
+          "task_growth_59",
+          "task_growth_67",
+          "task_growth_83",
+          "task_growth_76"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-16-workday-recovery",
+      "mode": "full",
+      "candidate_count": 80,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42",
+          "task_recovery_63"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-17-solitude-three-categories",
+      "mode": "full",
+      "candidate_count": 187,
+      "round_task_ids": [
+        [
+          "task_growth_93",
+          "task_energy_108",
+          "task_recovery_132",
+          "task_energy_136",
+          "task_growth_100",
+          "task_growth_131",
+          "task_recovery_62",
+          "task_recovery_86",
+          "task_recovery_139",
+          "task_energy_123"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-18-bored-city",
+      "mode": "full",
+      "candidate_count": 280,
+      "round_task_ids": [
+        [
+          "task_social_06",
+          "task_explore_15",
+          "task_social_102",
+          "task_social_01",
+          "task_social_17",
+          "task_social_30",
+          "task_explore_30",
+          "task_social_14",
+          "task_explore_03",
+          "task_explore_85"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 55,
+        "total": 55
+      },
+      "issues": []
+    },
+    {
+      "id": "full-19-anxious-home",
+      "mode": "full",
+      "candidate_count": 177,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_energy_91",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-20-recharge-growth",
+      "mode": "full",
+      "candidate_count": 218,
+      "round_task_ids": [
+        [
+          "task_energy_91",
+          "task_growth_118",
+          "task_energy_106",
+          "task_energy_110",
+          "task_energy_117",
+          "task_energy_126",
+          "task_growth_93",
+          "task_energy_104",
+          "task_energy_108",
+          "task_energy_122"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-21-repeat-home-recovery",
+      "mode": "full",
+      "candidate_count": 98,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42",
+          "task_recovery_63"
+        ],
+        [
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42",
+          "task_recovery_63",
+          "task_recovery_76"
+        ],
+        [
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42",
+          "task_recovery_63",
+          "task_recovery_76",
+          "task_recovery_81"
+        ]
+      ],
+      "constraints": {
+        "passed": 30,
+        "total": 30
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 30
+      },
+      "reasons": {
+        "passed": 300,
+        "total": 300
+      },
+      "issues": []
+    },
+    {
+      "id": "full-22-repeat-nearby-energy",
+      "mode": "full",
+      "candidate_count": 126,
+      "round_task_ids": [
+        [
+          "task_energy_07",
+          "task_energy_134",
+          "task_energy_16",
+          "task_energy_20",
+          "task_energy_36",
+          "task_energy_62",
+          "task_energy_99",
+          "task_energy_111",
+          "task_energy_09",
+          "task_energy_114"
+        ],
+        [
+          "task_energy_134",
+          "task_energy_16",
+          "task_energy_20",
+          "task_energy_36",
+          "task_energy_62",
+          "task_energy_99",
+          "task_energy_111",
+          "task_energy_09",
+          "task_energy_114",
+          "task_energy_24"
+        ],
+        [
+          "task_energy_16",
+          "task_energy_20",
+          "task_energy_36",
+          "task_energy_62",
+          "task_energy_99",
+          "task_energy_111",
+          "task_energy_09",
+          "task_energy_114",
+          "task_energy_24",
+          "task_energy_25"
+        ]
+      ],
+      "constraints": {
+        "passed": 30,
+        "total": 30
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 30
+      },
+      "reasons": {
+        "passed": 257,
+        "total": 257
+      },
+      "issues": []
+    },
+    {
+      "id": "full-23-repeat-city-growth",
+      "mode": "full",
+      "candidate_count": 140,
+      "round_task_ids": [
+        [
+          "task_growth_118",
+          "task_growth_93",
+          "task_growth_100",
+          "task_growth_103",
+          "task_growth_117",
+          "task_growth_131",
+          "task_growth_132",
+          "task_growth_34",
+          "task_growth_42",
+          "task_growth_95"
+        ],
+        [
+          "task_growth_93",
+          "task_growth_100",
+          "task_growth_103",
+          "task_growth_117",
+          "task_growth_131",
+          "task_growth_132",
+          "task_growth_34",
+          "task_growth_42",
+          "task_growth_95",
+          "task_growth_105"
+        ],
+        [
+          "task_growth_100",
+          "task_growth_103",
+          "task_growth_117",
+          "task_growth_131",
+          "task_growth_132",
+          "task_growth_34",
+          "task_growth_42",
+          "task_growth_95",
+          "task_growth_105",
+          "task_growth_127"
+        ]
+      ],
+      "constraints": {
+        "passed": 30,
+        "total": 30
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 30
+      },
+      "reasons": {
+        "passed": 270,
+        "total": 270
+      },
+      "issues": []
+    },
+    {
+      "id": "full-24-zero-budget-social",
+      "mode": "full",
+      "candidate_count": 95,
+      "round_task_ids": [
+        [
+          "task_social_104",
+          "task_social_109",
+          "task_social_100",
+          "task_social_122",
+          "task_social_107",
+          "task_social_112",
+          "task_social_130",
+          "task_social_134",
+          "task_social_140",
+          "task_social_61"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 84,
+        "total": 84
+      },
+      "issues": []
+    },
+    {
+      "id": "full-25-hot-nearby",
+      "mode": "full",
+      "candidate_count": 267,
+      "round_task_ids": [
+        [
+          "task_recovery_100",
+          "task_energy_91",
+          "task_recovery_140",
+          "task_energy_106",
+          "task_energy_110",
+          "task_energy_117",
+          "task_energy_126",
+          "task_recovery_110",
+          "task_recovery_137",
+          "task_recovery_93"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-26-cold-city",
+      "mode": "full",
+      "candidate_count": 277,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_explore_125",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35",
+          "task_recovery_42"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-27-quick-change",
+      "mode": "full",
+      "candidate_count": 113,
+      "round_task_ids": [
+        [
+          "task_recovery_100",
+          "task_energy_91",
+          "task_recovery_140",
+          "task_energy_106",
+          "task_energy_110",
+          "task_energy_117",
+          "task_energy_126",
+          "task_recovery_110",
+          "task_recovery_137",
+          "task_recovery_93"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 90,
+        "total": 90
+      },
+      "issues": []
+    },
+    {
+      "id": "full-28-afternoon-group",
+      "mode": "full",
+      "candidate_count": 153,
+      "round_task_ids": [
+        [
+          "task_energy_23",
+          "task_social_06",
+          "task_energy_101",
+          "task_energy_133",
+          "task_energy_125",
+          "task_energy_109",
+          "task_social_102",
+          "task_social_01",
+          "task_social_12",
+          "task_social_17"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 62,
+        "total": 62
+      },
+      "issues": []
+    },
+    {
+      "id": "full-29-low-budget-three-categories",
+      "mode": "full",
+      "candidate_count": 269,
+      "round_task_ids": [
+        [
+          "task_recovery_126",
+          "task_explore_125",
+          "task_growth_113",
+          "task_recovery_131",
+          "task_recovery_133",
+          "task_recovery_91",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_35"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 100,
+        "total": 100
+      },
+      "issues": []
+    },
+    {
+      "id": "full-30-morning-all-categories",
+      "mode": "full",
+      "candidate_count": 668,
+      "round_task_ids": [
+        [
+          "task_energy_07",
+          "task_growth_128",
+          "task_social_06",
+          "task_explore_08",
+          "task_recovery_100",
+          "task_energy_23",
+          "task_energy_26",
+          "task_energy_134",
+          "task_energy_16",
+          "task_energy_20"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 75,
+        "total": 75
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-01-empty-1m",
+      "mode": "quick",
+      "candidate_count": 0,
+      "round_task_ids": [
+        []
+      ],
+      "constraints": {
+        "passed": 1,
+        "total": 1
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 0
+      },
+      "reasons": {
+        "passed": 0,
+        "total": 0
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-02-empty-5m",
+      "mode": "quick",
+      "candidate_count": 0,
+      "round_task_ids": [
+        []
+      ],
+      "constraints": {
+        "passed": 1,
+        "total": 1
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 0
+      },
+      "reasons": {
+        "passed": 0,
+        "total": 0
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-03-low-10m",
+      "mode": "quick",
+      "candidate_count": 3,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32"
+        ]
+      ],
+      "constraints": {
+        "passed": 3,
+        "total": 3
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 3
+      },
+      "reasons": {
+        "passed": 9,
+        "total": 9
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-04-medium-10m",
+      "mode": "quick",
+      "candidate_count": 3,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32"
+        ]
+      ],
+      "constraints": {
+        "passed": 3,
+        "total": 3
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 3
+      },
+      "reasons": {
+        "passed": 6,
+        "total": 6
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-05-high-10m",
+      "mode": "quick",
+      "candidate_count": 3,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32"
+        ]
+      ],
+      "constraints": {
+        "passed": 3,
+        "total": 3
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 3
+      },
+      "reasons": {
+        "passed": 6,
+        "total": 6
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-06-low-15m",
+      "mode": "quick",
+      "candidate_count": 7,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_11",
+          "task_energy_16"
+        ]
+      ],
+      "constraints": {
+        "passed": 7,
+        "total": 7
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 7
+      },
+      "reasons": {
+        "passed": 21,
+        "total": 21
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-07-medium-15m",
+      "mode": "quick",
+      "candidate_count": 7,
+      "round_task_ids": [
+        [
+          "task_energy_11",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_16"
+        ]
+      ],
+      "constraints": {
+        "passed": 7,
+        "total": 7
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 7
+      },
+      "reasons": {
+        "passed": 14,
+        "total": 14
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-08-high-15m",
+      "mode": "quick",
+      "candidate_count": 7,
+      "round_task_ids": [
+        [
+          "task_energy_11",
+          "task_energy_16",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18"
+        ]
+      ],
+      "constraints": {
+        "passed": 7,
+        "total": 7
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 7
+      },
+      "reasons": {
+        "passed": 14,
+        "total": 14
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-09-low-20m",
+      "mode": "quick",
+      "candidate_count": 10,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02",
+          "task_energy_11",
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_16"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 30,
+        "total": 30
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-10-medium-20m",
+      "mode": "quick",
+      "candidate_count": 10,
+      "round_task_ids": [
+        [
+          "task_energy_11",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_06",
+          "task_energy_27",
+          "task_recovery_02",
+          "task_energy_16"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 20,
+        "total": 20
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-11-high-20m",
+      "mode": "quick",
+      "candidate_count": 10,
+      "round_task_ids": [
+        [
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_11",
+          "task_energy_16",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 20,
+        "total": 20
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-12-low-30m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02",
+          "task_energy_11",
+          "task_energy_22",
+          "task_energy_01",
+          "task_energy_06"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 30,
+        "total": 30
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-13-medium-30m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_energy_11",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_06",
+          "task_energy_27"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 20,
+        "total": 20
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-14-high-30m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_11",
+          "task_energy_16",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 20,
+        "total": 20
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-15-low-45m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02",
+          "task_energy_11",
+          "task_energy_22",
+          "task_energy_01",
+          "task_energy_06"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 30,
+        "total": 30
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-16-medium-45m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_energy_11",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_06",
+          "task_energy_27"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 20,
+        "total": 20
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-17-high-60m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_11",
+          "task_energy_16",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08"
+        ]
+      ],
+      "constraints": {
+        "passed": 10,
+        "total": 10
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 10
+      },
+      "reasons": {
+        "passed": 20,
+        "total": 20
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-18-repeat-low-20m",
+      "mode": "quick",
+      "candidate_count": 10,
+      "round_task_ids": [
+        [
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02",
+          "task_energy_11",
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_16"
+        ],
+        [
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02",
+          "task_energy_11",
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_16"
+        ],
+        [
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02",
+          "task_energy_11",
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_16"
+        ]
+      ],
+      "constraints": {
+        "passed": 27,
+        "total": 27
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 27
+      },
+      "reasons": {
+        "passed": 81,
+        "total": 81
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-19-repeat-medium-30m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_energy_11",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_06",
+          "task_energy_27"
+        ],
+        [
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_06",
+          "task_energy_27",
+          "task_recovery_02"
+        ],
+        [
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_energy_06",
+          "task_energy_27",
+          "task_recovery_02",
+          "task_energy_16"
+        ]
+      ],
+      "constraints": {
+        "passed": 30,
+        "total": 30
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 30
+      },
+      "reasons": {
+        "passed": 60,
+        "total": 60
+      },
+      "issues": []
+    },
+    {
+      "id": "quick-20-repeat-high-60m",
+      "mode": "quick",
+      "candidate_count": 12,
+      "round_task_ids": [
+        [
+          "task_energy_06",
+          "task_energy_27",
+          "task_energy_11",
+          "task_energy_16",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08"
+        ],
+        [
+          "task_energy_27",
+          "task_energy_11",
+          "task_energy_16",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18"
+        ],
+        [
+          "task_energy_11",
+          "task_energy_16",
+          "task_energy_22",
+          "task_energy_01",
+          "task_recovery_01",
+          "task_recovery_11",
+          "task_recovery_32",
+          "task_recovery_08",
+          "task_recovery_18",
+          "task_recovery_02"
+        ]
+      ],
+      "constraints": {
+        "passed": 30,
+        "total": 30
+      },
+      "repetition": {
+        "violations": 0,
+        "total": 30
+      },
+      "reasons": {
+        "passed": 60,
+        "total": 60
+      },
+      "issues": []
+    }
+  ],
+  "manual_review_status": "pending"
+}
