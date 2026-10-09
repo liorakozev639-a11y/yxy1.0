@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import logging
 from typing import Literal, Protocol
 
-from quick_task_catalog import quick_metadata
+from quick_task_catalog import quick_fallback_metadata, quick_metadata
 from task_repository import Task, TaskRepository
 
 
@@ -87,6 +87,25 @@ class TaskBankProvider:
                 if (action := quick_metadata(task)) is not None
             ]
         return [CandidateTask(task, "", "task_bank") for task in tasks]
+
+    def generate_quick_fallback(
+        self, context: RecommendationContext,
+    ) -> list[CandidateTask]:
+        """Return safe, low-preparation alternatives after the strict pool is empty."""
+        if context.mode != "quick":
+            return []
+        tasks = self.repository.search_tasks(
+            session_id=context.session_id,
+            budget_limit=context.budget_limit,
+            max_duration=context.available_minutes,
+            outing=context.outing,
+            company=context.company,
+        )
+        return [
+            CandidateTask(task, action, "task_bank_similar", True)
+            for task in tasks
+            if (action := quick_fallback_metadata(task)) is not None
+        ]
 
 
 class FallbackCandidateProvider:

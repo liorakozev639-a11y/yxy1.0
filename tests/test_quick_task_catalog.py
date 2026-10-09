@@ -9,7 +9,7 @@ from task_repository import TaskRepository
 class QuickCatalogTest(unittest.TestCase):
     def test_curated_entries_are_real_safe_and_actionable(self) -> None:
         by_id = {task.id: task for task in TaskRepository().public_tasks}
-        self.assertGreaterEqual(len(QUICK_FIRST_ACTIONS), 10)
+        self.assertGreaterEqual(len(QUICK_FIRST_ACTIONS), 50)
         for task_id, action in QUICK_FIRST_ACTIONS.items():
             task = by_id[task_id]
             self.assertEqual(task.status, "approved")

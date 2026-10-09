@@ -40,10 +40,15 @@ class QuickRecommendationService:
             if item["action"] == "disliked"
         }
         visible = [task for task in tasks if task["id"] not in disliked]
+        tier = next(
+            (task.get("recommendation_tier") for task in visible if task.get("recommendation_tier")),
+            None,
+        )
         return {
             "run_id": run_id,
             "primary_task": visible[0] if visible else None,
             "alternatives": visible[1:],
+            "recommendation_tier": tier,
             "constraints": (
                 {"budget_limit": 0, "outing": "home", "company": "solo"}
                 if run_id is not None else None
@@ -73,6 +78,18 @@ class QuickRecommendationService:
             history_weights=self.history.preference_weights(user_id),
             excluded_task_ids=self.history.excluded_task_ids(user_id),
         )
+        if tasks:
+            tasks = [{**task, "recommendation_tier": "strict"} for task in tasks]
+        else:
+            fallback = getattr(self.provider, "generate_quick_fallback", None)
+            fallback_candidates = fallback(context) if callable(fallback) else []
+            tasks = rank_quick(
+                context,
+                fallback_candidates,
+                history_weights=self.history.preference_weights(user_id),
+                excluded_task_ids=self.history.excluded_task_ids(user_id),
+            )
+            tasks = [{**task, "recommendation_tier": "similar"} for task in tasks]
         run_id = self.store.save_run(
             session_id, user_id, available_minutes, energy_level, tasks,
         )

@@ -436,6 +436,7 @@
         <button class="button primary" type="submit" ${state.busy ? 'disabled' : ''}>${state.busy ? '正在寻找' : '看看现在能做什么'}<i data-lucide="arrow-right" aria-hidden="true"></i></button>
       </form>
       ${run && run.run_id ? `<div class="quick-result">
+        ${run.recommendation_tier === 'similar' ? '<p class="quick-similar-note">严格的即时任务已用尽，下面是符合当前条件、但未重复的相似建议。</p>' : ''}
         ${state.quickRestSelected ? `<div class="quick-rest-state"><h2>这段时间就好好休息</h2><p>休息也是一种安排。</p></div>` : current ? `<div class="quick-primary" aria-live="polite">${quickTask(current)}
           <div class="quick-actions"><button class="button secondary compact" data-action="quick-like" ${state.busy ? 'disabled' : ''}>${liked ? '已喜欢' : '喜欢'}</button><button class="button ghost compact" data-action="quick-dislike" ${state.busy ? 'disabled' : ''}>不喜欢</button></div>
         </div>` : `<div class="quick-empty"><h2>当前条件下暂无合适建议</h2><p>可以调整时长，或者直接休息。</p></div>`}
